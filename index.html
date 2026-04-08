@@ -55,8 +55,24 @@
     input  { font-family: inherit; }
 
     /* ── Screen switching ── */
-    .screen { display: none; flex-direction: column; min-height: 100vh; }
-    .screen.active { display: flex; }
+    .screen {
+      display: none; flex-direction: column;
+      height: 100vh; max-height: 100vh;
+      overflow: hidden;   /* inactive screens invisible + no layout bleeding */
+      position: fixed; inset: 0; /* stack all screens at same position */
+      background: var(--surface-alt);
+    }
+    .screen.active {
+      display: flex;
+      position: relative; /* active screen flows normally */
+      height: auto; max-height: none;
+      min-height: 100vh;
+      overflow: visible;
+    }
+    /* Settings screen active: needs scroll */
+    #screen-settings.active {
+      overflow-y: auto;
+    }
 
     /* ════════════════════════════════
        TOPBAR (shared)
@@ -908,7 +924,8 @@ const State = {
   arrivedShown:        false,
   voiceType:           'female',   // 'female' | 'male' | 'custom'
   customVoiceEnabled:  false,
-  currentAudio:        null,       // currently playing Audio object
+  currentAudio:        null,       // currently playing AudioBufferSourceNode
+  audioCtx:           null,       // Web Audio API context (shared, unlocked on first tap)
   _cityField:          'city',
   _villageField:       'village',
 };
@@ -1763,25 +1780,43 @@ const App = {
   /* ── Map init ── */
   _initMap() {
     if (State.map) {
-      setTimeout(() => State.map.invalidateSize(), 300);
-      // Re-center to user position if available
-      if (State.userLat) {
-        State.map.setView([State.userLat, State.userLng], 15);
-      }
+      // Map already exists — invalidate size and re-centre after DOM settles
+      setTimeout(() => {
+        State.map.invalidateSize({ animate: false });
+        if (State.userLat) {
+          State.map.setView([State.userLat, State.userLng], 15, { animate: false });
+        }
+      }, 100);
       return;
     }
-    const lat = State.userLat || 25.014;
-    const lng = State.userLng || 121.468;
-    State.map = L.map('map', {
-      zoomControl: false,
-      attributionControl: false,
-      dragging: true,
-      tap: true,
-    }).setView([lat, lng], 15);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-    }).addTo(State.map);
-    L.control.zoom({ position: 'bottomleft' }).addTo(State.map);
+
+    // Wait for the tracking screen to be fully visible in the DOM
+    // before creating the Leaflet map so it can measure the container.
+    const initFn = () => {
+      const mapEl = document.getElementById('map');
+      if (!mapEl || mapEl.offsetHeight === 0) {
+        // Container not ready yet — retry
+        setTimeout(initFn, 100);
+        return;
+      }
+      const lat = State.userLat || 25.014;
+      const lng = State.userLng || 121.468;
+      State.map = L.map('map', {
+        zoomControl: false,
+        attributionControl: false,
+        dragging: true,
+        tap: true,
+      }).setView([lat, lng], 15);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+      }).addTo(State.map);
+      L.control.zoom({ position: 'bottomleft' }).addTo(State.map);
+      // Place user marker immediately if we have GPS
+      if (State.userLat) this._updateUserMarker();
+    };
+
+    // Use a short delay to let the flex layout render
+    setTimeout(initFn, 150);
   },
 
   // GPS button on map: fly to user position
@@ -2075,11 +2110,28 @@ const App = {
     State.voiceOn = !State.voiceOn;
     document.getElementById('voiceToggle').className =
       'toggle-wrap' + (State.voiceOn ? '' : ' off');
+
+    // Sync voiceType from settings DOM (user may have changed it)
+    this._syncVoiceTypeFromDOM();
+
     if (State.voiceOn) {
-      this._playAudio('您已開啟語音提醒請自行調整音量');
+      // Must force-play even though voiceOn was just turned on
+      this._playAudioForce('您已開啟語音提醒請自行調整音量');
     } else {
-      // Play off-message even though voiceOn just turned false
       this._playAudioForce('您已關閉語音提醒');
+    }
+  },
+
+  // Read current voiceType radio selection from DOM
+  _syncVoiceTypeFromDOM() {
+    const checked = document.querySelector('input[name="voiceType"]:checked');
+    if (checked) {
+      State.voiceType = checked.value;
+    }
+    // Also sync custom code status
+    const code = document.getElementById('customVoiceCode');
+    if (code) {
+      State.customVoiceEnabled = (code.value === '1212');
     }
   },
 
@@ -2097,25 +2149,66 @@ const App = {
     }
   },
 
-  // Play pre-recorded MP3 from audio/ folder
-  _playMP3(filename) {
+  // Play pre-recorded MP3 with Web Audio API gain boost
+  // Uses AudioContext to amplify volume before playback begins,
+  // preventing the "quiet start" issue of HTML5 Audio volume changes.
+  async _playMP3(filename) {
+    // Stop any currently playing audio
+    if (State.currentAudio) {
+      try { State.currentAudio.stop(); } catch(e) {}
+      State.currentAudio = null;
+    }
+
+    const url = `audio/${filename}.mp3`;
     try {
-      if (State.currentAudio) {
-        State.currentAudio.pause();
-        State.currentAudio = null;
+      // Get or create AudioContext (must be created/resumed after user gesture)
+      if (!State.audioCtx) {
+        State.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       }
-      const audio = new Audio(`audio/${filename}.mp3`);
-      audio.volume = 1;
-      audio.play().catch(e => {
-        console.warn('[GarbageTruck] MP3 play failed:', filename, e.message);
-        // Fallback to TTS if MP3 fails
-        this._speakTTS(filename);
-      });
-      State.currentAudio = audio;
+      if (State.audioCtx.state === 'suspended') {
+        await State.audioCtx.resume();
+      }
+
+      // Fetch and decode the MP3
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const arrayBuffer = await resp.arrayBuffer();
+      const audioBuffer  = await State.audioCtx.decodeAudioData(arrayBuffer);
+
+      // Build gain chain: source → gainNode → destination
+      const source   = State.audioCtx.createBufferSource();
+      const gainNode = State.audioCtx.createGain();
+
+      source.buffer = audioBuffer;
+      // Boost gain to 2.5× (max useful before clipping on most phones)
+      gainNode.gain.setValueAtTime(2.5, State.audioCtx.currentTime);
+
+      source.connect(gainNode);
+      gainNode.connect(State.audioCtx.destination);
+      source.start(0);
+
+      State.currentAudio = source;
+      console.log('[GarbageTruck] Playing MP3 (boosted):', filename);
+
+      source.onended = () => { State.currentAudio = null; };
     } catch(e) {
-      console.warn('[GarbageTruck] Audio error:', e);
+      console.warn('[GarbageTruck] MP3 failed, falling back to TTS:', filename, e.message);
       this._speakTTS(filename);
     }
+  },
+
+  // Pre-unlock AudioContext on first user interaction (call once)
+  _unlockAudio() {
+    if (State.audioCtx) return;
+    try {
+      State.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      // Create and immediately stop a silent buffer to unlock
+      const buf = State.audioCtx.createBuffer(1, 1, 22050);
+      const src = State.audioCtx.createBufferSource();
+      src.buffer = buf;
+      src.connect(State.audioCtx.destination);
+      src.start(0);
+    } catch(e) {}
   },
 
   // TTS: choose voice by State.voiceType
@@ -2186,6 +2279,10 @@ if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js').catch(console.warn);
   });
 }
+
+/* ── Unlock AudioContext on first user gesture ── */
+document.addEventListener('click', () => App._unlockAudio(), { once: true });
+document.addEventListener('touchstart', () => App._unlockAudio(), { once: true });
 
 /* ── Boot ── */
 App.init();
