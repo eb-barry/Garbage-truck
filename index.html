@@ -55,23 +55,24 @@
     input  { font-family: inherit; }
 
     /* ── Screen switching ── */
-    .screen {
-      display: none; flex-direction: column;
-      height: 100vh; max-height: 100vh;
-      overflow: hidden;   /* inactive screens invisible + no layout bleeding */
-      position: fixed; inset: 0; /* stack all screens at same position */
-      background: var(--surface-alt);
-    }
+    /* IMPORTANT: display:none removes the screen from layout entirely.
+       The active screen fills the viewport and scrolls within itself.
+       Do NOT use position:fixed here — it causes both screens to stack. */
+    .screen { display: none; }
     .screen.active {
-      display: flex;
-      position: relative; /* active screen flows normally */
-      height: auto; max-height: none;
+      display: flex; flex-direction: column;
       min-height: 100vh;
-      overflow: visible;
     }
-    /* Settings screen active: needs scroll */
+    /* Settings: full-page scroll */
     #screen-settings.active {
+      background: var(--surface-alt);
       overflow-y: auto;
+    }
+    /* Tracking: flex column, internal scroll via .track-scroll */
+    #screen-tracking.active {
+      background: #f0f4fa;
+      height: 100vh;
+      overflow: hidden;
     }
 
     /* ════════════════════════════════
@@ -336,11 +337,7 @@
     /* ════════════════════════════════
        TRACKING SCREEN — Blue & White
     ════════════════════════════════ */
-    #screen-tracking {
-      background: #f0f4fa;
-      display: flex; flex-direction: column; min-height: 100vh;
-      overflow-y: auto;
-    }
+    /* #screen-tracking display is handled by .screen / .screen.active above */
 
     /* ── Tracking topbar (blue) ── */
     .topbar-track {
@@ -371,6 +368,7 @@
 
     /* ── Scroll body ── */
     .track-scroll {
+      flex: 1; overflow-y: auto;
       padding: 14px 14px 36px;
       display: flex; flex-direction: column; gap: 12px;
     }
@@ -1024,19 +1022,28 @@ const App = {
 
   /* ── Screen switching ── */
   showScreen(name) {
-    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-    document.getElementById('screen-' + name).classList.add('active');
-    if (name === 'settings') {
-      this.populateSettingsFromState();
-      if (State.currentDistrict) {
-        this._showLocationCard(State.currentDistrict, '已儲存的位置');
-        this._activateStep(State.currentVillage ? 3 : 2);
+    try {
+      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+      const el = document.getElementById('screen-' + name);
+      if (!el) { console.error('[GarbageTruck] Screen not found:', name); return; }
+      el.classList.add('active');
+
+      if (name === 'settings') {
+        try { this.populateSettingsFromState(); } catch(e) { console.warn(e); }
+        if (State.currentDistrict) {
+          try { this._showLocationCard(State.currentDistrict, '已儲存的位置'); } catch(e) {}
+          try { this._activateStep(State.currentVillage ? 3 : 2); } catch(e) {}
+        }
+        if (State.tracking) {
+          try { this._stopTracking(); } catch(e) {}
+        }
       }
-      // Stop tracking if we go to settings
-      if (State.tracking) this._stopTracking();
-    }
-    if (name === 'tracking') {
-      this.initTrackingScreen();
+
+      if (name === 'tracking') {
+        try { this.initTrackingScreen(); } catch(e) { console.warn(e); }
+      }
+    } catch(e) {
+      console.error('[GarbageTruck] showScreen error:', e);
     }
   },
 
