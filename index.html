@@ -359,21 +359,7 @@
       display: flex; flex-direction: column; gap: 12px;
     }
 
-    /* ── Active route pill ── */
-    .active-route-pill {
-      display: flex; align-items: center; gap: 8px;
-      padding: 10px 16px;
-      background: #fff;
-      border: 1.5px solid #c8d8f0;
-      border-radius: 40px;
-      font-size: 15px; color: #1a52a8; font-weight: 600;
-    }
-    .route-pill-dot {
-      width: 10px; height: 10px; border-radius: 50%;
-      background: #1a52a8; flex-shrink: 0;
-    }
-    .route-pill-label { flex: 1; }
-    .route-pill-time  { font-size: 13px; color: #555; font-weight: 400; }
+
 
     /* ── Distance card (hero) ── */
     .dist-hero {
@@ -407,16 +393,36 @@
     }
     .dist-hero-eta-label { font-size: 14px; color: rgba(255,255,255,0.60); }
     .dist-hero-eta-val   { font-size: 20px; font-weight: 700; color: #fff; margin-top: 3px; }
-    .dist-hero-sched     { text-align: right; }
-    .dist-hero-sched-val { font-size: 16px; color: rgba(255,255,255,0.75); margin-top: 3px; }
+    .dist-hero-sched       { text-align: right; }
+    .dist-hero-sched-val   { font-size: 16px; color: rgba(255,255,255,0.75); margin-top: 3px; }
+    .dist-hero-route-name  { font-size: 15px; font-weight: 600; color: rgba(255,255,255,0.88); margin-top: 3px; }
 
-    /* ── Map ── */
-    #map {
-      height: 200px;
-      border-radius: var(--radius-lg);
-      border: 0.5px solid #c8d8f0;
-      overflow: hidden; z-index: 1;
+    /* Status color bar at bottom of hero card */
+    .status-bar {
+      height: 6px; width: 100%;
+      background: #4caf8a; /* default: green */
+      transition: background 0.4s;
     }
+    .status-bar.warning { background: #f0c040; }
+    .status-bar.danger  { background: #e05050; }
+
+    /* ── Map wrapper + GPS button ── */
+    .map-wrap {
+      position: relative; border-radius: var(--radius-lg);
+      overflow: hidden; border: 0.5px solid #c8d8f0;
+    }
+    #map {
+      height: 340px; z-index: 1;
+    }
+    .map-gps-btn {
+      position: absolute; top: 10px; right: 10px; z-index: 10;
+      width: 40px; height: 40px; border-radius: 50%;
+      background: #fff; border: 1.5px solid #c8d8f0;
+      font-size: 20px; line-height: 1; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.18);
+    }
+    .map-gps-btn:active { background: #e6eef9; }
 
     /* ── Alert card ── */
     .alert-card {
@@ -551,6 +557,36 @@
       border-top: 0.5px solid var(--border-med);
     }
 
+    /* ── Voice choice group ── */
+    .voice-choice-group {
+      display: flex; gap: 10px; margin-bottom: 4px;
+    }
+    .voice-choice {
+      flex: 1; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      padding: 14px 8px; gap: 6px;
+      border: 2px solid var(--border);
+      border-radius: var(--radius-md);
+      background: var(--surface); cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .voice-choice input[type=radio] { display: none; }
+    .voice-choice:has(input:checked) {
+      border-color: var(--blue-btn);
+      background: #e6eef9;
+    }
+    .vc-icon  { font-size: 28px; line-height: 1; }
+    .vc-label { font-size: 16px; font-weight: 600; color: var(--text-primary); }
+
+    .custom-voice-row { display: none; }
+    .custom-voice-row.visible { display: block; }
+    .custom-voice-status {
+      margin-top: 8px; padding: 10px 14px;
+      background: var(--green-light); border: 0.5px solid #7fcfa0;
+      border-radius: var(--radius-md);
+      font-size: 15px; color: var(--green-dark); font-weight: 500;
+    }
+
     /* ── Utility ── */
     .hidden { display: none !important; }
   </style>
@@ -662,13 +698,57 @@
               <div class="dist-label">提前通知距離</div>
               <div class="dist-value" id="distDisplay">500 公尺</div>
             </div>
-            <input type="range" id="distSlider" min="200" max="1000" step="100" value="500"
+            <input type="range" id="distSlider" min="100" max="1000" step="100" value="500"
               oninput="App.updateDist(this.value)">
             <div class="dist-ticks">
-              <span>200m</span><span>400m</span><span>600m</span><span>800m</span><span>1km</span>
+              <span>100m</span><span>300m</span><span>500m</span><span>700m</span><span>1km</span>
             </div>
             <div class="dist-hint" id="distHint">
               垃圾車進入 <strong>500 公尺</strong>範圍時，開始每 2 分鐘語音播報一次
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ STEP 5: 語音設定 ══ -->
+    <div class="step-card" id="step5Card">
+      <div class="step-row">
+        <div class="step-num active" id="snum5">5</div>
+        <div class="step-body">
+          <div class="step-title">語音播報設定</div>
+          <div class="step-desc">選擇語音播報的聲音類型</div>
+
+          <label class="field-label">選擇聲音</label>
+          <div class="voice-choice-group">
+            <label class="voice-choice" id="vcFemale">
+              <input type="radio" name="voiceType" value="female" checked
+                onchange="App.onVoiceTypeChange('female')">
+              <span class="vc-icon">👩</span>
+              <span class="vc-label">女聲</span>
+            </label>
+            <label class="voice-choice" id="vcMale">
+              <input type="radio" name="voiceType" value="male"
+                onchange="App.onVoiceTypeChange('male')">
+              <span class="vc-icon">👨</span>
+              <span class="vc-label">男聲</span>
+            </label>
+            <label class="voice-choice" id="vcCustom">
+              <input type="radio" name="voiceType" value="custom"
+                onchange="App.onVoiceTypeChange('custom')">
+              <span class="vc-icon">🎙</span>
+              <span class="vc-label">客製化</span>
+            </label>
+          </div>
+
+          <!-- Custom voice unlock field (hidden until code entered) -->
+          <div class="custom-voice-row" id="customVoiceRow">
+            <label class="field-label" style="margin-top:12px;">輸入啟用碼</label>
+            <input type="password" class="addr-input" id="customVoiceCode"
+              placeholder="請輸入啟用碼"
+              oninput="App.onCustomCodeInput(this.value)">
+            <div class="custom-voice-status hidden" id="customVoiceStatus">
+              ✅ 已啟用客製化人聲（MP3 音檔）
             </div>
           </div>
         </div>
@@ -705,15 +785,8 @@
 
   <div class="track-scroll">
 
-    <!-- Active route pill -->
-    <div class="active-route-pill" id="activeRoutePill">
-      <div class="route-pill-dot" id="pillDot"></div>
-      <div class="route-pill-label" id="pillLabel">尚未選擇路線</div>
-      <div class="route-pill-time"  id="pillTime"></div>
-    </div>
-
-    <!-- Distance hero card -->
-    <div class="dist-hero">
+    <!-- Distance hero card — route name inside, color status bar at bottom -->
+    <div class="dist-hero" id="distHeroCard">
       <div class="dist-hero-top">
         <div class="dist-hero-label">垃圾車距離您</div>
         <div class="dist-hero-update">
@@ -731,22 +804,20 @@
           <div class="dist-hero-eta-val" id="heroEtaVal">—</div>
         </div>
         <div class="dist-hero-sched">
-          <div class="dist-hero-eta-label">路線表定時間</div>
-          <div class="dist-hero-sched-val" id="heroSchedTime">—</div>
+          <div class="dist-hero-eta-label">追蹤路線</div>
+          <div class="dist-hero-route-name" id="heroRouteName">—</div>
         </div>
       </div>
+      <!-- Status color bar -->
+      <div class="status-bar" id="statusBar"></div>
     </div>
 
-    <!-- Map -->
-    <div id="map"></div>
-
-    <!-- Status alert -->
-    <div class="alert-card info" id="alertCard">
-      <div class="alert-icon" id="alertIcon">🕐</div>
-      <div>
-        <div class="alert-title" id="alertTitle">準備監控</div>
-        <div class="alert-sub"   id="alertSub">按下「開始監控」後，系統會每 2 分鐘報告垃圾車的距離</div>
-      </div>
+    <!-- Map with GPS-locate button -->
+    <div class="map-wrap">
+      <div id="map"></div>
+      <button class="map-gps-btn" id="mapGpsBtn" onclick="App.relocateMap()" title="回到我的位置">
+        📍
+      </button>
     </div>
 
     <!-- Voice toggle -->
@@ -831,12 +902,15 @@ const State = {
   countdown:    0,
   map:          null,
   markers:      { truck: null, user: null },
-  geoWatchId:     null,
-  wakeLock:       null,      // Screen Wake Lock API handle
-  activeLineid:   null,      // currently tracked route lineid
-  arrivedShown:   false,     // prevent duplicate arrived overlay
-  _cityField:    'city',
-  _villageField: 'village',
+  geoWatchId:          null,
+  wakeLock:            null,
+  activeLineid:        null,
+  arrivedShown:        false,
+  voiceType:           'female',   // 'female' | 'male' | 'custom'
+  customVoiceEnabled:  false,
+  currentAudio:        null,       // currently playing Audio object
+  _cityField:          'city',
+  _villageField:       'village',
 };
 
 /* ═══════════════════════════════════════════════════
@@ -881,11 +955,13 @@ function todayDayKey() {
 
 function saveToStorage() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
-    distAlert:       State.distAlert,
-    currentDistrict: State.currentDistrict,
-    currentVillage:  State.currentVillage,
-    allCheckedRoutes:State.allCheckedRoutes,
-    sel:             State.sel,
+    distAlert:          State.distAlert,
+    currentDistrict:    State.currentDistrict,
+    currentVillage:     State.currentVillage,
+    allCheckedRoutes:   State.allCheckedRoutes,
+    sel:                State.sel,
+    voiceType:          State.voiceType,
+    customVoiceEnabled: State.customVoiceEnabled,
   }));
 }
 
@@ -894,13 +970,15 @@ function loadFromStorage() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return false;
     const s = JSON.parse(raw);
-    State.distAlert        = s.distAlert        || 500;
-    State.currentDistrict  = s.currentDistrict  || null;
-    State.currentVillage   = s.currentVillage   || null;
-    State.allCheckedRoutes = s.allCheckedRoutes  || [];
-    State.checkedRoutes    = new Set(State.allCheckedRoutes);
-    State.sel              = s.sel              || { noon: null, night: null };
-    return !!(State.sel.noon || State.sel.night);
+    State.distAlert          = s.distAlert          || 500;
+    State.currentDistrict    = s.currentDistrict    || null;
+    State.currentVillage     = s.currentVillage     || null;
+    State.allCheckedRoutes   = s.allCheckedRoutes   || [];
+    State.checkedRoutes      = new Set(State.allCheckedRoutes);
+    State.sel                = s.sel                || { noon: null, night: null };
+    State.voiceType          = s.voiceType          || 'female';
+    State.customVoiceEnabled = s.customVoiceEnabled || false;
+    return State.allCheckedRoutes.length > 0;
   } catch { return false; }
 }
 
@@ -951,6 +1029,16 @@ const App = {
   populateSettingsFromState() {
     document.getElementById('distSlider').value = State.distAlert;
     this.updateDist(State.distAlert);
+    // Restore voice type radio
+    const radios = document.querySelectorAll('input[name="voiceType"]');
+    radios.forEach(r => { r.checked = (r.value === State.voiceType); });
+    if (State.voiceType === 'custom') {
+      document.getElementById('customVoiceRow').classList.add('visible');
+      if (State.customVoiceEnabled) {
+        document.getElementById('customVoiceCode').value = '1212';
+        document.getElementById('customVoiceStatus').classList.remove('hidden');
+      }
+    }
   },
 
   showNotice(msg, type = 'error') {
@@ -1589,6 +1677,30 @@ const App = {
       `垃圾車進入 <strong>${label}</strong>範圍時，開始每 2 分鐘語音播報一次`;
   },
 
+  // ── Settings: voice type ──
+  onVoiceTypeChange(type) {
+    State.voiceType = type;
+    const row = document.getElementById('customVoiceRow');
+    if (type === 'custom') {
+      row.classList.add('visible');
+    } else {
+      row.classList.remove('visible');
+      document.getElementById('customVoiceCode').value = '';
+      document.getElementById('customVoiceStatus').classList.add('hidden');
+      State.customVoiceEnabled = false;
+    }
+  },
+
+  onCustomCodeInput(val) {
+    if (val === '1212') {
+      State.customVoiceEnabled = true;
+      document.getElementById('customVoiceStatus').classList.remove('hidden');
+    } else {
+      State.customVoiceEnabled = false;
+      document.getElementById('customVoiceStatus').classList.add('hidden');
+    }
+  },
+
   saveSettings() {
     if (!State.currentDistrict) {
       this.showNotice('⚠️ 請先完成步驟 1：確認您的位置', 'error'); return;
@@ -1651,8 +1763,11 @@ const App = {
   /* ── Map init ── */
   _initMap() {
     if (State.map) {
-      // Already initialised — just resize in case DOM changed
-      setTimeout(() => State.map.invalidateSize(), 200);
+      setTimeout(() => State.map.invalidateSize(), 300);
+      // Re-center to user position if available
+      if (State.userLat) {
+        State.map.setView([State.userLat, State.userLng], 15);
+      }
       return;
     }
     const lat = State.userLat || 25.014;
@@ -1666,8 +1781,17 @@ const App = {
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
     }).addTo(State.map);
-    // Add compact zoom control
-    L.control.zoom({ position: 'bottomright' }).addTo(State.map);
+    L.control.zoom({ position: 'bottomleft' }).addTo(State.map);
+  },
+
+  // GPS button on map: fly to user position
+  relocateMap() {
+    if (!State.map) return;
+    if (State.userLat) {
+      State.map.flyTo([State.userLat, State.userLng], 15, { duration: 0.8 });
+    } else {
+      this.requestLocation();
+    }
   },
 
   _makeUserIcon() {
@@ -1883,26 +2007,26 @@ const App = {
       dist >= 1000 ? '公里' : '公尺';
     document.getElementById('heroEtaVal').textContent = etaText(dist);
 
-    const row = (State.cachedRouteJSON || []).find(r => r.lineid === lineid);
-    document.getElementById('heroSchedTime').textContent =
-      row ? (row.linename || lineid) + '  ' + (row.time || '') : lineid;
-
     // Update map
-    this._updateTruckMarker(tLat, tLng, row ? row.linename : lineid);
+    const truckRow = (State.cachedRouteJSON || []).find(r => r.lineid === lineid);
+    this._updateTruckMarker(tLat, tLng, truckRow ? truckRow.linename : lineid);
 
-    // Alert state + voice
+    // Update route name in hero card
+    const row = (State.cachedRouteJSON || []).find(r => r.lineid === lineid);
+    document.getElementById('heroRouteName').textContent =
+      row ? (row.linename || lineid) : lineid;
+
+    // Status bar + voice
+    const bar = document.getElementById('statusBar');
     if (dist <= 200) {
-      this._setAlert('danger', '🔔', '垃圾車即將到達，請準備！',
-        `垃圾車距離您約 ${dist} 公尺，請帶垃圾下樓！`);
-      if (State.voiceOn) this._speak('垃圾車即將到達，請準備。');
+      bar.className = 'status-bar danger';
+      this._playAudio('垃圾車即將到達請準備');
       if (dist <= 80) this._showArrived();
     } else if (dist <= State.distAlert) {
-      this._setAlert('warning', '📢', '垃圾車接近中',
-        `距離您 ${dist} 公尺，已進入通知範圍（${State.distAlert} 公尺）。每 2 分鐘自動更新。`);
-      if (State.voiceOn) this._speak(`垃圾車距離您 ${dist} 公尺。`);
+      bar.className = 'status-bar warning';
+      this._playAudio(this._distanceAudioKey(dist));
     } else {
-      this._setAlert('info', '🟢', '持續監控中',
-        `垃圾車距離您 ${dist} 公尺，尚在通知距離（${State.distAlert} 公尺）之外。`);
+      bar.className = 'status-bar';
     }
   },
 
@@ -1942,27 +2066,97 @@ const App = {
     }, 1000);
   },
 
-  /* ── Voice ── */
+  /* ════════════════════════════════════════════════
+     VOICE ENGINE
+  ════════════════════════════════════════════════ */
+
+  // Toggle voice on/off, play confirmation audio
   toggleVoice() {
     State.voiceOn = !State.voiceOn;
     document.getElementById('voiceToggle').className =
       'toggle-wrap' + (State.voiceOn ? '' : ' off');
+    if (State.voiceOn) {
+      this._playAudio('您已開啟語音提醒請自行調整音量');
+    } else {
+      // Play off-message even though voiceOn just turned false
+      this._playAudioForce('您已關閉語音提醒');
+    }
   },
 
-  _speak(text) {
+  // Main audio dispatcher: MP3 if custom+enabled, else TTS
+  _playAudio(textKey) {
+    if (!State.voiceOn) return;
+    this._playAudioForce(textKey);
+  },
+
+  _playAudioForce(textKey) {
+    if (State.voiceType === 'custom' && State.customVoiceEnabled) {
+      this._playMP3(textKey);
+    } else {
+      this._speakTTS(textKey);
+    }
+  },
+
+  // Play pre-recorded MP3 from audio/ folder
+  _playMP3(filename) {
+    try {
+      if (State.currentAudio) {
+        State.currentAudio.pause();
+        State.currentAudio = null;
+      }
+      const audio = new Audio(`audio/${filename}.mp3`);
+      audio.volume = 1;
+      audio.play().catch(e => {
+        console.warn('[GarbageTruck] MP3 play failed:', filename, e.message);
+        // Fallback to TTS if MP3 fails
+        this._speakTTS(filename);
+      });
+      State.currentAudio = audio;
+    } catch(e) {
+      console.warn('[GarbageTruck] Audio error:', e);
+      this._speakTTS(filename);
+    }
+  },
+
+  // TTS: choose voice by State.voiceType
+  _speakTTS(text) {
     if (!window.speechSynthesis) return;
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     u.lang = 'zh-TW'; u.rate = 0.88; u.volume = 1;
+
+    // Pick voice
+    const voices = window.speechSynthesis.getVoices().filter(v =>
+      v.lang.startsWith('zh') || v.lang.startsWith('cmn')
+    );
+    if (voices.length > 0) {
+      if (State.voiceType === 'male') {
+        // Try to find a male voice; heuristic: voices after index 0 tend to be male
+        u.voice = voices.find(v => /male|man|男/i.test(v.name)) || voices[1] || voices[0];
+      } else {
+        // Female: first zh voice (usually female on most systems)
+        u.voice = voices.find(v => /female|woman|女/i.test(v.name)) || voices[0];
+      }
+    }
     window.speechSynthesis.speak(u);
   },
+
+  // Convert distance to closest segment audio filename
+  _distanceAudioKey(dist) {
+    if (dist <= 100) return '垃圾車距離您200公尺';      // same as 200m bucket
+    const seg = Math.ceil(dist / 100) * 100;
+    const capped = Math.min(seg, 1000);
+    return `垃圾車距離您${capped}公尺`;
+  },
+
+
 
   /* ── Arrived overlay ── */
   _showArrived() {
     if (State.arrivedShown) return;
     State.arrivedShown = true;
     document.getElementById('arrived-overlay').classList.add('visible');
-    if (State.voiceOn) this._speak('垃圾車到了，請準備。');
+    this._playAudioForce('垃圾車到了請準備');
   },
 
   dismissArrived() {
