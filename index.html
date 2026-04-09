@@ -920,10 +920,11 @@ const State = {
   wakeLock:            null,
   activeLineid:        null,
   arrivedShown:        false,
-  voiceType:           'female',   // 'female' | 'male' | 'custom'
+  voiceType:           'female',
   customVoiceEnabled:  false,
-  currentAudio:        null,       // currently playing AudioBufferSourceNode
-  audioCtx:           null,       // Web Audio API context (shared, unlocked on first tap)
+  currentAudio:        null,
+  audioCtx:            null,
+  savedRouteInfo:      [],   // [{lineid, linename, time}] persisted to localStorage
   _cityField:          'city',
   _villageField:       'village',
 };
@@ -974,6 +975,7 @@ function saveToStorage() {
     currentDistrict:    State.currentDistrict,
     currentVillage:     State.currentVillage,
     allCheckedRoutes:   State.allCheckedRoutes,
+    savedRouteInfo:     State.savedRouteInfo,   // [{lineid, linename, time}]
     sel:                State.sel,
     voiceType:          State.voiceType,
     customVoiceEnabled: State.customVoiceEnabled,
@@ -989,6 +991,7 @@ function loadFromStorage() {
     State.currentDistrict    = s.currentDistrict    || null;
     State.currentVillage     = s.currentVillage     || null;
     State.allCheckedRoutes   = s.allCheckedRoutes   || [];
+    State.savedRouteInfo     = s.savedRouteInfo     || [];
     State.checkedRoutes      = new Set(State.allCheckedRoutes);
     State.sel                = s.sel                || { noon: null, night: null };
     State.voiceType          = s.voiceType          || 'female';
@@ -1736,24 +1739,27 @@ const App = {
       this.showNotice('⚠️ 請在步驟 3 中勾選至少一條路線', 'error'); return;
     }
 
-    // Persist all selected route lineid's
     State.allCheckedRoutes = [...State.checkedRoutes];
-
-    // Map day/night for backward compatibility
     const rj = State.cachedRouteJSON || [];
-    const dayR   = State.allCheckedRoutes.filter(id => {
+
+    // Extract and persist route metadata (lineid + linename + time)
+    // This is critical: tracking screen needs these even after page reload
+    // when cachedRouteJSON is no longer in memory.
+    State.savedRouteInfo = State.allCheckedRoutes.map(id => {
       const r = rj.find(x => x.lineid === id);
-      return r && parseInt((r.time||'0').split(':')[0]) < 17;
+      return r
+        ? { lineid: r.lineid, linename: r.linename || id, time: r.time || '' }
+        : { lineid: id, linename: id, time: '' };
     });
-    const nightR = State.allCheckedRoutes.filter(id => {
-      const r = rj.find(x => x.lineid === id);
-      return r && parseInt((r.time||'0').split(':')[0]) >= 17;
-    });
-    State.sel.noon  = dayR[0]   || nightR[0] || State.allCheckedRoutes[0];
-    State.sel.night = nightR[0] || dayR[0]   || State.allCheckedRoutes[0];
+
+    // Map to day/night slots
+    const dayR   = State.savedRouteInfo.filter(r => parseInt((r.time||'0').split(':')[0]) < 17);
+    const nightR = State.savedRouteInfo.filter(r => parseInt((r.time||'0').split(':')[0]) >= 17);
+    State.sel.noon  = (dayR[0]   || nightR[0] || State.savedRouteInfo[0])?.lineid;
+    State.sel.night = (nightR[0] || dayR[0]   || State.savedRouteInfo[0])?.lineid;
 
     saveToStorage();
-    State.arrivedShown = false; // reset for new session
+    State.arrivedShown = false;
     this.showScreen('tracking');
   },
 
@@ -1764,66 +1770,115 @@ const App = {
   initTrackingScreen() {
     this._autoSelectRouteByTime();
     this._updateActivePill();
+    this._showRouteInfoOnHero();   // populate hero card immediately
     this._initMap();
     this._acquireWakeLock();
-    // Start GPS watch so user marker updates continuously
     this.requestLocation();
   },
 
-  /* ── Active route pill ── */
+  // Show route info on hero card immediately (before tracking starts)
+  _showRouteInfoOnHero() {
+    const lineid = State.activeLineid;
+    if (!lineid) return;
+    const row = (State.savedRouteInfo || []).find(r => r.lineid === lineid)
+             || (State.cachedRouteJSON || []).find(r => r.lineid === lineid);
+
+    const nameEl  = document.getElementById('heroRouteName');
+    const etaEl   = document.getElementById('heroEtaVal');
+    const schedEl = document.getElementById('heroSchedTime');
+
+    if (nameEl)  nameEl.textContent  = row ? (row.linename || lineid) : lineid;
+    if (etaEl)   etaEl.textContent   = '—';
+    if (schedEl) schedEl.textContent = row ? (row.time || '—') : '—';
+
+    // Show all checked routes as summary in countdown area
+    const summary = (State.savedRouteInfo || [])
+      .filter(r => State.allCheckedRoutes.includes(r.lineid))
+      .map(r => `${r.linename || r.lineid}（${r.time}）`)
+      .join('　');
+    const countdown = document.getElementById('countdownRow');
+    if (countdown && summary) countdown.textContent = '已設定路線：' + summary;
+  },
+
+  /* ── Update hero card route info ── */
   _updateActivePill() {
     const lineid = State.activeLineid;
     if (!lineid) return;
-    const row = (State.cachedRouteJSON || []).find(r => r.lineid === lineid);
-    document.getElementById('pillLabel').textContent =
-      row ? (row.linename || lineid) : lineid;
-    document.getElementById('pillTime').textContent =
-      row ? ('表定 ' + (row.time || '')) : '';
-    const dot = document.getElementById('pillDot');
-    const h = row ? parseInt((row.time || '0')) : 12;
-    dot.style.background = h >= 17 ? '#2255a0' : '#c07800';
+
+    // Find route info from savedRouteInfo first, then cachedRouteJSON
+    let row = (State.savedRouteInfo || []).find(r => r.lineid === lineid);
+    if (!row && State.cachedRouteJSON) {
+      row = State.cachedRouteJSON.find(r => r.lineid === lineid);
+    }
+    // If still nothing, use lineid itself
+    const name = row ? (row.linename || lineid) : lineid;
+    const time = row ? (row.time || '') : '';
+
+    // Update hero card route name
+    const routeEl = document.getElementById('heroRouteName');
+    if (routeEl) routeEl.textContent = name;
+
+    // Update hero card ETA label with scheduled time
+    const schedEl = document.getElementById('heroEtaVal');
+    if (schedEl && !State.tracking) {
+      schedEl.textContent = time ? ('表定 ' + time) : '—';
+    }
+
+    console.log('[GarbageTruck] Pill updated:', name, time);
   },
 
   /* ── Map init ── */
   _initMap() {
     if (State.map) {
-      // Map already exists — invalidate size and re-centre after DOM settles
+      // Map already exists — call invalidateSize after a short delay
+      // to let the flex layout re-render
       setTimeout(() => {
-        State.map.invalidateSize({ animate: false });
+        try { State.map.invalidateSize({ animate: false }); } catch(e) {}
         if (State.userLat) {
-          State.map.setView([State.userLat, State.userLng], 15, { animate: false });
+          try {
+            State.map.setView([State.userLat, State.userLng], 15, { animate: false });
+          } catch(e) {}
         }
-      }, 100);
+      }, 300);
       return;
     }
 
-    // Wait for the tracking screen to be fully visible in the DOM
-    // before creating the Leaflet map so it can measure the container.
-    const initFn = () => {
-      const mapEl = document.getElementById('map');
-      if (!mapEl || mapEl.offsetHeight === 0) {
-        // Container not ready yet — retry
-        setTimeout(initFn, 100);
-        return;
+    // Create the map after the screen is visible.
+    // We wait 400ms — enough for iOS Safari to finish flex layout.
+    // We do NOT rely on offsetHeight (unreliable on iOS before first paint).
+    const doCreate = () => {
+      try {
+        const lat = State.userLat || 25.014;
+        const lng = State.userLng || 121.468;
+
+        State.map = L.map('map', {
+          zoomControl:      false,
+          attributionControl: false,
+          dragging:         true,
+          tap:              true,
+        }).setView([lat, lng], 15);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom:     19,
+          attribution: '',
+        }).addTo(State.map);
+
+        L.control.zoom({ position: 'bottomleft' }).addTo(State.map);
+
+        // Force a size recalculation after tiles start loading
+        setTimeout(() => {
+          try { State.map.invalidateSize({ animate: false }); } catch(e) {}
+          if (State.userLat) this._updateUserMarker();
+        }, 300);
+
+        console.log('[GarbageTruck] Map created');
+      } catch(e) {
+        console.error('[GarbageTruck] Map init error:', e);
       }
-      const lat = State.userLat || 25.014;
-      const lng = State.userLng || 121.468;
-      State.map = L.map('map', {
-        zoomControl: false,
-        attributionControl: false,
-        dragging: true,
-        tap: true,
-      }).setView([lat, lng], 15);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-      }).addTo(State.map);
-      L.control.zoom({ position: 'bottomleft' }).addTo(State.map);
-      // Place user marker immediately if we have GPS
-      if (State.userLat) this._updateUserMarker();
     };
 
-    // Use a short delay to let the flex layout render
-    setTimeout(initFn, 150);
+    // 400ms delay = safe for iOS Safari flex layout completion
+    setTimeout(doCreate, 400);
   },
 
   // GPS button on map: fly to user position
@@ -1979,31 +2034,55 @@ const App = {
   },
 
   /* ── Auto-select route by time ── */
+  // Uses savedRouteInfo (always available from localStorage) as primary source,
+  // falls back to cachedRouteJSON if available.
   _autoSelectRouteByTime() {
     const routes = State.allCheckedRoutes || [];
     if (!routes.length) return;
-    const rj     = State.cachedRouteJSON || [];
-    const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
 
+    // Build a lookup: lineid → {linename, time}
+    // Priority: savedRouteInfo (persisted) > cachedRouteJSON (session only)
+    const info = {};
+    (State.savedRouteInfo || []).forEach(r => { info[r.lineid] = r; });
+    if (State.cachedRouteJSON) {
+      State.cachedRouteJSON.forEach(r => {
+        if (!info[r.lineid]) info[r.lineid] = r;
+      });
+    }
+
+    const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
     let best = null, bestScore = Infinity;
+
     routes.forEach(id => {
-      const row = rj.find(r => r.lineid === id);
+      const row = info[id];
       if (!row || !row.time) return;
-      const [hh, mm] = row.time.split(':').map(Number);
+      const parts = row.time.split(':').map(Number);
+      const hh = parts[0], mm = parts[1] || 0;
       if (isNaN(hh)) return;
-      const rMin = hh * 60 + (mm || 0);
+      const rMin = hh * 60 + mm;
       const diff = rMin - nowMin;
       const score = diff >= 0 ? diff : diff + 1440;
       if (score < bestScore) { bestScore = score; best = id; }
     });
     State.activeLineid = best || routes[0];
 
-    // Also set sel for GPS matching
-    const dayR   = routes.filter(id => { const r=rj.find(x=>x.lineid===id); return r && parseInt(r.time)<1700; });
-    const nightR = routes.filter(id => { const r=rj.find(x=>x.lineid===id); return r && parseInt(r.time)>=1700; });
+    const dayR   = routes.filter(id => {
+      const r = info[id];
+      if (!r || !r.time) return false;
+      return parseInt(r.time.split(':')[0]) < 17;
+    });
+    const nightR = routes.filter(id => {
+      const r = info[id];
+      if (!r || !r.time) return false;
+      return parseInt(r.time.split(':')[0]) >= 17;
+    });
+
     State.sel.noon  = dayR[0]   || nightR[0] || routes[0];
     State.sel.night = nightR[0] || dayR[0]   || routes[0];
     State.activeTab = new Date().getHours() >= 17 ? 'night' : 'noon';
+
+    console.log('[GarbageTruck] Active route:', State.activeLineid,
+      '| info:', info[State.activeLineid]);
   },
 
   /* ── GPS fetch loop ── */
@@ -2053,10 +2132,11 @@ const App = {
     const truckRow = (State.cachedRouteJSON || []).find(r => r.lineid === lineid);
     this._updateTruckMarker(tLat, tLng, truckRow ? truckRow.linename : lineid);
 
-    // Update route name in hero card
-    const row = (State.cachedRouteJSON || []).find(r => r.lineid === lineid);
-    document.getElementById('heroRouteName').textContent =
-      row ? (row.linename || lineid) : lineid;
+    // Update route name from savedRouteInfo (always available) or cachedRouteJSON
+    const row = (State.savedRouteInfo || []).find(r => r.lineid === lineid)
+             || (State.cachedRouteJSON || []).find(r => r.lineid === lineid);
+    const el = document.getElementById('heroRouteName');
+    if (el) el.textContent = row ? (row.linename || lineid) : lineid;
 
     // Status bar + voice
     const bar = document.getElementById('statusBar');
