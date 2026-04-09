@@ -712,13 +712,13 @@
               <div class="dist-label">提前通知距離</div>
               <div class="dist-value" id="distDisplay">500 公尺</div>
             </div>
-            <input type="range" id="distSlider" min="100" max="1000" step="100" value="500"
+            <input type="range" id="distSlider" min="100" max="2000" step="100" value="500"
               oninput="App.updateDist(this.value)">
             <div class="dist-ticks">
-              <span>100m</span><span>300m</span><span>500m</span><span>700m</span><span>1km</span>
+              <span>100m</span><span>500m</span><span>1km</span><span>1.5km</span><span>2km</span>
             </div>
             <div class="dist-hint" id="distHint">
-              垃圾車進入 <strong>500 公尺</strong>範圍時，開始每 2 分鐘語音播報一次
+              垃圾車進入 <strong>500 公尺</strong>範圍時，開始每 30 秒語音播報一次
             </div>
           </div>
         </div>
@@ -887,7 +887,7 @@ const API_GPS    = 'https://data.ntpc.gov.tw/api/datasets/28ab4122-60e1-4065-98e
 // Confirmed working without CORS issues from browser (tested April 2026).
 const CSV_FULL   = 'https://data.ntpc.gov.tw/api/datasets/edc3ad26-8ae7-4916-a00b-bc6048d19bf8/csv/file';
 const NOMINATIM  = 'https://nominatim.openstreetmap.org';
-const UPDATE_MS  = 2 * 60 * 1000;
+const UPDATE_MS  = 30 * 1000;  // 30 seconds (gov GPS updates every 2 min, we poll every 30s to catch updates promptly)
 const STORAGE_KEY = 'gtSettings';
 
 /* ═══════════════════════════════════════════════════
@@ -1698,10 +1698,15 @@ const App = {
   updateDist(val) {
     const v = parseInt(val);
     State.distAlert = v;
-    const label = v >= 1000 ? '1 公里' : v + ' 公尺';
+    let label;
+    if (v >= 1000) {
+      label = (v / 1000).toFixed(1).replace('.0', '') + ' 公里';
+    } else {
+      label = v + ' 公尺';
+    }
     document.getElementById('distDisplay').textContent = label;
     document.getElementById('distHint').innerHTML =
-      `垃圾車進入 <strong>${label}</strong>範圍時，開始每 2 分鐘語音播報一次`;
+      `垃圾車進入 <strong>${label}</strong>範圍時，開始每 30 秒語音播報一次`;
   },
 
   // ── Settings: voice type ──
@@ -1742,14 +1747,31 @@ const App = {
     State.allCheckedRoutes = [...State.checkedRoutes];
     const rj = State.cachedRouteJSON || [];
 
-    // Extract and persist route metadata (lineid + linename + time)
-    // This is critical: tracking screen needs these even after page reload
-    // when cachedRouteJSON is no longer in memory.
+    // Extract and persist route metadata (lineid + linename + earliest_time)
+    // Critical: tracking screen needs these after page reload when
+    // cachedRouteJSON is gone.
+    // We pick the EARLIEST time across all stops for each lineid,
+    // because savedRouteInfo.time is used to identify which route is
+    // currently running (closest to user's current time).
     State.savedRouteInfo = State.allCheckedRoutes.map(id => {
-      const r = rj.find(x => x.lineid === id);
-      return r
-        ? { lineid: r.lineid, linename: r.linename || id, time: r.time || '' }
-        : { lineid: id, linename: id, time: '' };
+      const allStops = rj.filter(x => x.lineid === id);
+      if (!allStops.length) return { lineid: id, linename: id, time: '' };
+
+      // Find earliest time (rank=1 or minimum time value)
+      const rank1 = allStops.find(x => x.rank === '1' || x.rank === 1);
+      let earliest = rank1 || allStops[0];
+      allStops.forEach(s => {
+        if (!s.time || !earliest.time) return;
+        const [h1, m1] = (earliest.time).split(':').map(Number);
+        const [h2, m2] = (s.time).split(':').map(Number);
+        if (h2 * 60 + m2 < h1 * 60 + m1) earliest = s;
+      });
+
+      return {
+        lineid:   earliest.lineid,
+        linename: earliest.linename || id,
+        time:     earliest.time || '',
+      };
     });
 
     // Map to day/night slots
@@ -2059,12 +2081,37 @@ const App = {
       const parts = row.time.split(':').map(Number);
       const hh = parts[0], mm = parts[1] || 0;
       if (isNaN(hh)) return;
-      const rMin = hh * 60 + mm;
-      const diff = rMin - nowMin;
-      const score = diff >= 0 ? diff : diff + 1440;
+      const rMin   = hh * 60 + mm;
+      const diff   = rMin - nowMin;  // positive = future, negative = past
+
+      // Scoring strategy:
+      // 1. Route within the next 3 hours (0 to +180 min): score = diff (smaller = closer = better)
+      // 2. Route that started up to 3 hours ago (-180 to 0 min): still likely running, score = 1000 + |diff|
+      // 3. Anything else: score = 2000 + wrapped-around diff (lower priority)
+      let score;
+      if (diff >= 0 && diff <= 180) {
+        score = diff;                   // imminent or upcoming
+      } else if (diff < 0 && diff >= -180) {
+        score = 1000 + Math.abs(diff);  // possibly still running
+      } else {
+        // Further away — wrap around midnight
+        const wrapped = diff >= 0 ? diff : diff + 1440;
+        score = 2000 + wrapped;
+      }
+
       if (score < bestScore) { bestScore = score; best = id; }
     });
     State.activeLineid = best || routes[0];
+
+    console.log('[GarbageTruck] Route selection at', nowMin, 'min:',
+      routes.map(id => {
+        const r = info[id]; if (!r) return id;
+        const [h,m] = (r.time||'0:0').split(':').map(Number);
+        const diff = (h*60+m) - nowMin;
+        return id + '(' + r.time + ',diff=' + diff + ')';
+      }).join(' | '),
+      '→ selected:', State.activeLineid
+    );
 
     const dayR   = routes.filter(id => {
       const r = info[id];
@@ -2176,11 +2223,7 @@ const App = {
       if (!State.tracking) { clearInterval(State.countdownTimer); row.textContent = ''; return; }
       State.countdown--;
       if (State.countdown > 0) {
-        const m = Math.floor(State.countdown / 60);
-        const s = State.countdown % 60;
-        row.textContent = m > 0
-          ? `下次更新：${m} 分 ${s} 秒後`
-          : `下次更新：${s} 秒後`;
+        row.textContent = `下次更新：${State.countdown} 秒後`;
       } else {
         State.countdown = UPDATE_MS / 1000;
         row.textContent = '';
@@ -2322,10 +2365,11 @@ const App = {
   },
 
   // Convert distance to closest segment audio filename
+  // Audio files only go up to 1000m; anything further uses 1000m file
   _distanceAudioKey(dist) {
-    if (dist <= 100) return '垃圾車距離您200公尺';      // same as 200m bucket
-    const seg = Math.ceil(dist / 100) * 100;
-    const capped = Math.min(seg, 1000);
+    if (dist <= 100) return '垃圾車距離您200公尺';
+    const seg    = Math.ceil(dist / 100) * 100;
+    const capped = Math.min(seg, 1000);   // cap at 1000m (highest recorded audio)
     return `垃圾車距離您${capped}公尺`;
   },
 
