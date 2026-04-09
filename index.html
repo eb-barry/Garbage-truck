@@ -1,2376 +1,1738 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <meta name="theme-color" content="#1a6b3c">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="垃圾車快到了">
-  <title>垃圾車快到了</title>
-  <link rel="manifest" href="manifest.json">
-  <link rel="apple-touch-icon" href="icons/icon-192.png">
-
-  <!-- Leaflet CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-
-  <style>
-    /* ── Reset & Base ── */
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    :root {
-      --green-dark:   #1a6b3c;
-      --green-mid:    #2a8a50;
-      --green-light:  #e8f5ee;
-      --blue-badge:   #1a52a8;
-      --blue-btn:     #1a52a8;
-      --blue-btn-dark:#134088;
-      --amber:        #c07800;
-      --amber-bg:     #fffbf0;
-      --amber-border: #e8c84a;
-      --navy:         #2255a0;
-      --navy-bg:      #f0f4fb;
-      --danger:       #b83030;
-      --danger-bg:    #fff5f5;
-      --danger-border:#e88a8a;
-      --voice-on:     #cc2200;
-      --text-primary: #1a1a1a;
-      --text-secondary: #666;
-      --text-hint:    #999;
-      --border:       rgba(0,0,0,0.10);
-      --border-med:   rgba(0,0,0,0.18);
-      --surface:      #fff;
-      --surface-alt:  #f7f8f7;
-      --radius-md:    10px;
-      --radius-lg:    14px;
-    }
-    html, body {
-      height: 100%;
-      font-family: -apple-system, 'Noto Sans TC', 'PingFang TC', sans-serif;
-      background: var(--surface-alt);
-      color: var(--text-primary);
-      -webkit-font-smoothing: antialiased;
-    }
-    button { font-family: inherit; cursor: pointer; }
-    input  { font-family: inherit; }
-
-    /* ── Screen switching ── */
-    /* IMPORTANT: display:none removes the screen from layout entirely.
-       The active screen fills the viewport and scrolls within itself.
-       Do NOT use position:fixed here — it causes both screens to stack. */
-    .screen { display: none; }
-    .screen.active {
-      display: flex; flex-direction: column;
-      min-height: 100vh;
-    }
-    /* Settings: full-page scroll */
-    #screen-settings.active {
-      background: var(--surface-alt);
-      overflow-y: auto;
-    }
-    /* Tracking: flex column, internal scroll via .track-scroll */
-    #screen-tracking.active {
-      background: #f0f4fa;
-      height: 100vh;
-      overflow: hidden;
-    }
-
-    /* ════════════════════════════════
-       TOPBAR (shared)
-    ════════════════════════════════ */
-    .topbar {
-      background: var(--green-dark);
-      padding: 14px 18px 12px;
-      display: flex; align-items: center; gap: 10px;
-      flex-shrink: 0;
-      position: sticky; top: 0; z-index: 100;
-    }
-    .topbar-icon { font-size: 22px; line-height: 1; }
-    .topbar-titles { flex: 1; min-width: 0; }
-    .topbar-title { color: #fff; font-size: 20px; font-weight: 600; letter-spacing: -0.3px; }
-    .topbar-sub   { color: rgba(255,255,255,0.70); font-size: 13px; margin-top: 1px; }
-    .badge-city {
-      background: var(--blue-badge); color: #fff;
-      font-size: 12px; padding: 4px 11px;
-      border-radius: 20px; white-space: nowrap; flex-shrink: 0;
-    }
-    .topbar-action {
-      background: rgba(255,255,255,0.15); border: none; color: #fff;
-      border-radius: 50%; width: 34px; height: 34px; font-size: 17px;
-      display: flex; align-items: center; justify-content: center;
-      flex-shrink: 0;
-    }
-    .topbar-action:active { background: rgba(255,255,255,0.28); }
-
-    /* ════════════════════════════════
-       SETTINGS SCREEN
-    ════════════════════════════════ */
-    #screen-settings .scroll-body {
-      flex: 1; overflow-y: auto; padding: 16px 14px 40px;
-      display: flex; flex-direction: column; gap: 14px;
-    }
-
-    /* Step card */
-    .step-card {
-      background: var(--surface);
-      border: 0.5px solid var(--border);
-      border-radius: var(--radius-lg);
-      padding: 20px 18px 22px;
-    }
-    .step-row { display: flex; gap: 14px; }
-    .step-num {
-      width: 34px; height: 34px; border-radius: 50%;
-      background: #ccc; color: #fff;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 16px; font-weight: 700; flex-shrink: 0;
-      margin-top: 2px; transition: background 0.25s;
-    }
-    .step-num.active { background: var(--green-dark); }
-    .step-body { flex: 1; min-width: 0; }
-    .step-title { font-size: 20px; font-weight: 700; margin-bottom: 6px; color: var(--text-primary); }
-    .step-desc  { font-size: 15px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 14px; }
-
-    /* ── GPS location card ── */
-    .location-display {
-      display: flex; align-items: center; gap: 12px;
-      padding: 14px 16px; margin-bottom: 12px;
-      background: var(--green-light);
-      border: 1.5px solid #7fcfa0;
-      border-radius: var(--radius-md);
-    }
-    .location-icon { font-size: 26px; flex-shrink: 0; }
-    .location-info { flex: 1; min-width: 0; }
-    .location-district {
-      font-size: 22px; font-weight: 700; color: var(--green-dark);
-      line-height: 1.2;
-    }
-    .location-detail { font-size: 14px; color: var(--text-secondary); margin-top: 3px; }
-
-    .gps-btn {
-      width: 100%; padding: 18px 14px;
-      background: var(--blue-btn); color: #fff; border: none;
-      border-radius: var(--radius-md); font-size: 20px; font-weight: 700;
-      display: flex; align-items: center; justify-content: center; gap: 10px;
-      transition: opacity 0.15s; letter-spacing: 0.2px;
-    }
-    .gps-btn:active { opacity: 0.82; }
-    .gps-btn:disabled { opacity: 0.55; }
-
-    /* ── District manual selector (GPS fallback) ── */
-    .manual-district {
-      display: none; margin-top: 12px;
-    }
-    .manual-district.visible { display: block; }
-    .field-label {
-      font-size: 16px; font-weight: 600; color: var(--text-primary);
-      margin-bottom: 8px; display: block;
-    }
-    .big-select {
-      width: 100%; font-size: 19px; padding: 14px 16px;
-      border: 1.5px solid var(--border-med);
-      border-radius: var(--radius-md);
-      background: var(--surface); color: var(--text-primary);
-      appearance: none; -webkit-appearance: none;
-      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'%3E%3Cpath fill='%23666' d='M5 7l5 5 5-5z'/%3E%3C/svg%3E");
-      background-repeat: no-repeat;
-      background-position: right 14px center;
-      background-size: 22px;
-      cursor: pointer; outline: none;
-    }
-    .big-select:focus { border-color: var(--green-dark); }
-    .big-select option { font-size: 17px; padding: 8px; }
-
-    .or-divider {
-      display: flex; align-items: center; gap: 10px;
-      margin: 16px 0; color: var(--text-hint); font-size: 14px;
-    }
-    .or-divider::before, .or-divider::after {
-      content: ''; flex: 1; border-top: 0.5px solid var(--border-med);
-    }
-
-    /* ── Village selector ── */
-    .village-section { display: none; margin-top: 0; }
-    .village-section.visible { display: block; }
-
-    /* ── Route list ── */
-    .route-area { display: none; margin-top: 4px; }
-    .route-area.visible { display: block; }
-
-    .route-item {
-      display: flex; align-items: flex-start; gap: 12px;
-      padding: 16px 14px; margin-bottom: 10px;
-      border: 2px solid var(--border);
-      border-radius: var(--radius-md);
-      background: var(--surface); cursor: pointer;
-      transition: border-color 0.15s, background 0.15s;
-    }
-    .route-item:active { opacity: 0.85; }
-    .route-item.checked {
-      border-color: var(--green-dark);
-      background: var(--green-light);
-    }
-
-    /* Checkbox */
-    .route-check {
-      width: 28px; height: 28px; border-radius: 6px;
-      border: 2.5px solid var(--border-med);
-      display: flex; align-items: center; justify-content: center;
-      flex-shrink: 0; margin-top: 2px;
-      transition: border-color 0.15s, background 0.15s;
-      font-size: 18px; color: transparent;
-    }
-    .route-item.checked .route-check {
-      border-color: var(--green-dark);
-      background: var(--green-dark);
-      color: #fff;
-    }
-
-    .route-info { flex: 1; min-width: 0; }
-    .route-name {
-      font-size: 19px; font-weight: 700; color: var(--text-primary);
-      line-height: 1.3;
-    }
-    .route-lineid {
-      font-size: 13px; color: var(--text-hint); margin-top: 2px;
-    }
-    .route-time {
-      font-size: 17px; font-weight: 600; color: var(--green-dark);
-      margin-top: 6px;
-    }
-    .route-days {
-      font-size: 14px; color: var(--text-secondary); margin-top: 4px;
-      line-height: 1.5;
-    }
-    .route-stops {
-      font-size: 13px; color: var(--text-hint); margin-top: 4px;
-      line-height: 1.5;
-    }
-
-    .tag-today {
-      display: inline-block;
-      font-size: 13px; font-weight: 600; padding: 3px 10px;
-      border-radius: 20px;
-      background: var(--green-dark); color: #fff;
-      margin-left: 8px; vertical-align: middle;
-    }
-    .tag-night {
-      display: inline-block;
-      font-size: 13px; font-weight: 600; padding: 3px 10px;
-      border-radius: 20px;
-      background: #2255a0; color: #fff;
-      margin-left: 8px; vertical-align: middle;
-    }
-
-    /* Selection summary */
-    .sel-summary {
-      display: none; margin-top: 14px; padding: 14px 16px;
-      background: var(--surface-alt); border: 0.5px solid var(--border);
-      border-radius: var(--radius-md);
-      font-size: 16px; color: var(--text-secondary); line-height: 2.0;
-    }
-    .sel-summary.visible { display: block; }
-    .sel-summary strong { color: var(--text-primary); font-size: 17px; }
-
-    /* Distance slider */
-    .dist-label-row {
-      display: flex; align-items: baseline;
-      justify-content: space-between; margin-bottom: 12px;
-    }
-    .dist-label { font-size: 18px; font-weight: 600; }
-    .dist-value { font-size: 26px; font-weight: 700; color: var(--green-dark); }
-    input[type=range] {
-      width: 100%; accent-color: var(--green-dark); height: 8px; cursor: pointer;
-    }
-    .dist-ticks {
-      display: flex; justify-content: space-between;
-      font-size: 13px; color: var(--text-hint); margin-top: 6px;
-    }
-    .dist-hint {
-      margin-top: 10px; font-size: 15px; color: var(--text-secondary); line-height: 1.6;
-    }
-
-    /* Save button */
-    .save-btn {
-      width: 100%; padding: 20px; border: none;
-      background: var(--blue-btn); color: #fff;
-      border-radius: var(--radius-md); font-size: 22px; font-weight: 700;
-      transition: opacity 0.15s; letter-spacing: 0.3px;
-    }
-    .save-btn:active { opacity: 0.82; }
-    .save-btn:hover  { background: var(--blue-btn-dark); }
-
-    /* Notice */
-    .notice {
-      padding: 14px 16px; border-radius: var(--radius-md);
-      font-size: 16px; line-height: 1.6; display: none;
-    }
-    .notice.visible { display: block; }
-    .notice.error { background: var(--danger-bg); border: 0.5px solid var(--danger-border); color: #8a2020; }
-    .notice.info  { background: var(--green-light); border: 0.5px solid #8fcfaa; color: #1a5030; }
-
-    /* Loading spinner */
-    .spinner {
-      display: none; width: 24px; height: 24px; border-radius: 50%;
-      border: 3px solid rgba(255,255,255,0.35);
-      border-top-color: #fff;
-      animation: spin 0.7s linear infinite;
-    }
-    .spinner.visible { display: inline-block; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    /* Progress bar */
-    .progress-bar {
-      display: none; margin-top: 12px; padding: 12px 14px;
-      background: var(--green-light); border: 0.5px solid #7fcfa0;
-      border-radius: var(--radius-md);
-      font-size: 15px; color: var(--green-dark);
-      align-items: center; gap: 10px;
-    }
-    .progress-bar.visible { display: flex; }
-    .progress-spin {
-      width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0;
-      border: 3px solid rgba(26,107,60,0.25);
-      border-top-color: var(--green-dark);
-      animation: spin 0.8s linear infinite;
-    }
-
-    /* ════════════════════════════════
-       TRACKING SCREEN — Blue & White
-    ════════════════════════════════ */
-    /* #screen-tracking display is handled by .screen / .screen.active above */
-
-    /* ── Tracking topbar (blue) ── */
-    .topbar-track {
-      background: #1a52a8;
-      padding: 14px 18px 12px;
-      display: flex; align-items: center; gap: 10px;
-      flex-shrink: 0; position: sticky; top: 0; z-index: 100;
-    }
-    .topbar-track .topbar-title { color: #fff; font-size: 20px; font-weight: 700; }
-    .topbar-track .topbar-sub   { color: rgba(255,255,255,0.70); font-size: 13px; margin-top: 1px; }
-    .topbar-track .badge-city   { background: rgba(255,255,255,0.20); }
-    .gear-btn {
-      margin-left: auto;
-      background: rgba(255,255,255,0.15); border: none; color: #fff;
-      border-radius: 50%; width: 40px; height: 40px; font-size: 20px;
-      display: flex; align-items: center; justify-content: center;
-      cursor: pointer; flex-shrink: 0;
-    }
-    .gear-btn:active { background: rgba(255,255,255,0.30); }
-
-    /* ── Wake lock banner ── */
-    .wake-banner {
-      background: #1a52a8; color: rgba(255,255,255,0.85);
-      font-size: 13px; text-align: center; padding: 5px 12px;
-      display: none;
-    }
-    .wake-banner.visible { display: block; }
-
-    /* ── Scroll body ── */
-    .track-scroll {
-      flex: 1; overflow-y: auto;
-      padding: 14px 14px 36px;
-      display: flex; flex-direction: column; gap: 12px;
-    }
-
-
-
-    /* ── Distance card (hero) ── */
-    .dist-hero {
-      background: #1a52a8;
-      border-radius: var(--radius-lg);
-      overflow: hidden;
-    }
-    .dist-hero-top {
-      padding: 18px 22px 8px;
-      display: flex; align-items: center; justify-content: space-between;
-    }
-    .dist-hero-label { font-size: 15px; color: rgba(255,255,255,0.70); }
-    .dist-hero-update {
-      display: flex; align-items: center; gap: 6px;
-      font-size: 13px; color: rgba(255,255,255,0.65);
-    }
-    .dist-hero-dot {
-      width: 8px; height: 8px; border-radius: 50%;
-      background: #7ef0a8; flex-shrink: 0;
-    }
-    .dist-hero-num-row {
-      padding: 0 22px 18px;
-      display: flex; align-items: baseline; gap: 8px;
-    }
-    .dist-hero-num  { font-size: 80px; font-weight: 700; color: #fff; line-height: 1; }
-    .dist-hero-unit { font-size: 26px; color: rgba(255,255,255,0.80); font-weight: 500; }
-    .dist-hero-eta {
-      padding: 12px 22px 14px;
-      border-top: 0.5px solid rgba(255,255,255,0.15);
-      display: flex; justify-content: space-between; align-items: center;
-    }
-    .dist-hero-eta-label { font-size: 14px; color: rgba(255,255,255,0.60); }
-    .dist-hero-eta-val   { font-size: 20px; font-weight: 700; color: #fff; margin-top: 3px; }
-    .dist-hero-sched       { text-align: right; }
-    .dist-hero-sched-val   { font-size: 16px; color: rgba(255,255,255,0.75); margin-top: 3px; }
-    .dist-hero-route-name  { font-size: 15px; font-weight: 600; color: rgba(255,255,255,0.88); margin-top: 3px; }
-
-    /* Status color bar at bottom of hero card */
-    .status-bar {
-      height: 6px; width: 100%;
-      background: #4caf8a; /* default: green */
-      transition: background 0.4s;
-    }
-    .status-bar.warning { background: #f0c040; }
-    .status-bar.danger  { background: #e05050; }
-
-    /* ── Map wrapper + GPS button ── */
-    .map-wrap {
-      position: relative; border-radius: var(--radius-lg);
-      overflow: hidden; border: 0.5px solid #c8d8f0;
-    }
-    #map {
-      height: 340px; z-index: 1;
-    }
-    .map-gps-btn {
-      position: absolute; top: 10px; right: 10px; z-index: 10;
-      width: 40px; height: 40px; border-radius: 50%;
-      background: #fff; border: 1.5px solid #c8d8f0;
-      font-size: 20px; line-height: 1; cursor: pointer;
-      display: flex; align-items: center; justify-content: center;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.18);
-    }
-    .map-gps-btn:active { background: #e6eef9; }
-
-    /* ── Alert card ── */
-    .alert-card {
-      border-radius: var(--radius-lg);
-      padding: 16px 18px;
-      display: flex; align-items: flex-start; gap: 14px;
-    }
-    .alert-card.ok      { background: #e8f5ee; border: 0.5px solid #7fcfa0; }
-    .alert-card.info    { background: #e6eef9; border: 1px solid #8ab0e0; }
-    .alert-card.warning { background: #fff8e6; border: 1.5px solid #f0c040; }
-    .alert-card.danger  { background: #fff0f0; border: 2px solid #e05050;
-                          animation: pulse-border 1s infinite; }
-    @keyframes pulse-border {
-      0%,100% { border-color: #e05050; }
-      50%      { border-color: #ff8888; }
-    }
-    .alert-icon  { font-size: 28px; flex-shrink: 0; line-height: 1.1; }
-    .alert-title { font-size: 20px; font-weight: 700; color: var(--text-primary); }
-    .alert-sub   { font-size: 15px; color: var(--text-secondary); margin-top: 5px; line-height: 1.6; }
-
-    /* ── Voice row ── */
-    .voice-row {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 14px 18px;
-      background: #fff; border: 0.5px solid #c8d8f0;
-      border-radius: var(--radius-md);
-    }
-    .voice-label { font-size: 18px; color: var(--text-primary); }
-    .toggle-wrap {
-      width: 54px; height: 30px; border-radius: 15px;
-      background: var(--voice-on); position: relative;
-      cursor: pointer; border: none; transition: background 0.2s;
-      flex-shrink: 0;
-    }
-    .toggle-wrap.off { background: #bbb; }
-    .toggle-thumb {
-      width: 24px; height: 24px; border-radius: 50%; background: #fff;
-      position: absolute; top: 3px; right: 3px;
-      transition: right 0.2s, left 0.2s;
-    }
-    .toggle-wrap.off .toggle-thumb { right: auto; left: 3px; }
-
-    /* ── Countdown row ── */
-    .countdown-row {
-      text-align: center;
-      font-size: 14px; color: #666;
-      padding: 4px 0;
-    }
-
-    /* ── Track button ── */
-    .track-btn {
-      width: 100%; padding: 20px; border: none;
-      border-radius: var(--radius-md); font-size: 22px; font-weight: 700;
-      letter-spacing: 0.3px; cursor: pointer;
-      transition: opacity 0.15s;
-    }
-    .track-btn.start {
-      background: #1a52a8; color: #fff;
-    }
-    .track-btn.stop {
-      background: var(--danger); color: #fff;
-    }
-    .track-btn:active { opacity: 0.82; }
-
-    /* ── Arrived overlay ── */
-    #arrived-overlay {
-      display: none; position: fixed; inset: 0; z-index: 500;
-      background: rgba(26,82,168,0.92);
-      flex-direction: column; align-items: center; justify-content: center;
-      padding: 32px;
-    }
-    #arrived-overlay.visible { display: flex; }
-    .arrived-icon  { font-size: 80px; margin-bottom: 20px; }
-    .arrived-title { font-size: 32px; font-weight: 700; color: #fff; text-align: center; margin-bottom: 12px; }
-    .arrived-sub   { font-size: 18px; color: rgba(255,255,255,0.80); text-align: center; margin-bottom: 32px; line-height: 1.6; }
-    .arrived-btn   {
-      padding: 18px 48px; background: #fff; color: #1a52a8;
-      border: none; border-radius: var(--radius-md);
-      font-size: 20px; font-weight: 700; cursor: pointer;
-    }
-
-    /* ── Permission overlay ── */
-    /* ── Permission overlay ── */
-    #perm-overlay {
-      display: none; position: fixed; inset: 0; z-index: 999;
-      background: rgba(0,0,0,0.55);
-      align-items: center; justify-content: center; padding: 24px;
-    }
-    #perm-overlay.visible { display: flex; }
-    .perm-box {
-      background: #fff; border-radius: var(--radius-lg);
-      padding: 28px 24px; max-width: 340px; width: 100%; text-align: center;
-    }
-    .perm-icon { font-size: 44px; margin-bottom: 12px; }
-    .perm-title { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
-    .perm-desc  { font-size: 15px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
-    .perm-btn {
-      width: 100%; padding: 15px; background: var(--blue-btn);
-      color: #fff; border: none; border-radius: var(--radius-md);
-      font-size: 18px; font-weight: 500;
-    }
-
-    /* ── GPS button ── */
-    .gps-btn {
-      width: 100%; padding: 16px 14px; margin-bottom: 10px;
-      background: var(--blue-btn); color: #fff; border: none;
-      border-radius: var(--radius-md); font-size: 19px; font-weight: 600;
-      display: flex; align-items: center; justify-content: center; gap: 8px;
-      transition: opacity 0.15s;
-    }
-    .gps-btn:active { opacity: 0.82; }
-    .gps-btn:hover  { background: var(--blue-btn-dark); }
-    .gps-btn:disabled { opacity: 0.55; }
-
-    .gps-result {
-      display: flex; align-items: center; gap: 8px;
-      padding: 10px 14px; margin-bottom: 10px;
-      background: var(--green-light);
-      border: 0.5px solid #7fcfa0;
-      border-radius: var(--radius-md);
-      font-size: 15px; color: var(--green-dark); font-weight: 500;
-    }
-    .gps-ok-icon { font-size: 16px; flex-shrink: 0; }
-
-    /* ── Or divider ── */
-    .or-divider {
-      display: flex; align-items: center; gap: 10px;
-      margin: 14px 0 12px; color: var(--text-hint); font-size: 13px;
-    }
-    .or-divider::before, .or-divider::after {
-      content: ''; flex: 1;
-      border-top: 0.5px solid var(--border-med);
-    }
-
-    /* ── Voice choice group ── */
-    .voice-choice-group {
-      display: flex; gap: 10px; margin-bottom: 4px;
-    }
-    .voice-choice {
-      flex: 1; display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
-      padding: 14px 8px; gap: 6px;
-      border: 2px solid var(--border);
-      border-radius: var(--radius-md);
-      background: var(--surface); cursor: pointer;
-      transition: border-color 0.15s, background 0.15s;
-    }
-    .voice-choice input[type=radio] { display: none; }
-    .voice-choice:has(input:checked) {
-      border-color: var(--blue-btn);
-      background: #e6eef9;
-    }
-    .vc-icon  { font-size: 28px; line-height: 1; }
-    .vc-label { font-size: 16px; font-weight: 600; color: var(--text-primary); }
-
-    .custom-voice-row { display: none; }
-    .custom-voice-row.visible { display: block; }
-    .custom-voice-status {
-      margin-top: 8px; padding: 10px 14px;
-      background: var(--green-light); border: 0.5px solid #7fcfa0;
-      border-radius: var(--radius-md);
-      font-size: 15px; color: var(--green-dark); font-weight: 500;
-    }
-
-    /* ── Utility ── */
-    .hidden { display: none !important; }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#1a6b3c">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="垃圾車快到了">
+<title>垃圾車快到了</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<!-- Leaflet CSS -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+/* ── Reset & Base ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+--green-dark:   #1a6b3c;
+--green-mid:    #2a8a50;
+--green-light:  #e8f5ee;
+--blue-badge:   #1a52a8;
+--blue-btn:     #1a52a8;
+--blue-btn-dark:#134088;
+--amber:        #c07800;
+--amber-bg:     #fffbf0;
+--amber-border: #e8c84a;
+--navy:         #2255a0;
+--navy-bg:      #f0f4fb;
+--danger:       #b83030;
+--danger-bg:    #fff5f5;
+--danger-border:#e88a8a;
+--voice-on:     #cc2200;
+--text-primary: #1a1a1a;
+--text-secondary: #666;
+--text-hint:    #999;
+--border:       rgba(0,0,0,0.10);
+--border-med:   rgba(0,0,0,0.18);
+--surface:      #fff;
+--surface-alt:  #f7f8f7;
+--radius-md:    10px;
+--radius-lg:    14px;
+}
+html, body {
+height: 100%;
+font-family: -apple-system, 'Noto Sans TC', 'PingFang TC', sans-serif;
+background: var(--surface-alt);
+color: var(--text-primary);
+-webkit-font-smoothing: antialiased;
+}
+button { font-family: inherit; cursor: pointer; }
+input  { font-family: inherit; }
+/* ── Screen switching ── */
+.screen { display: none; }
+.screen.active {
+display: flex; flex-direction: column;
+min-height: 100vh;
+}
+/* Settings: full-page scroll */
+#screen-settings.active {
+background: var(--surface-alt);
+overflow-y: auto;
+}
+/* Tracking: flex column, internal scroll via .track-scroll */
+#screen-tracking.active {
+background: #f0f4fa;
+height: 100vh;
+overflow: hidden;
+}
+/* ════════════════════════════════
+TOPBAR (shared)
+════════════════════════════════ */
+.topbar {
+background: var(--green-dark);
+padding: 14px 18px 12px;
+display: flex; align-items: center; gap: 10px;
+flex-shrink: 0;
+position: sticky; top: 0; z-index: 100;
+}
+.topbar-icon { font-size: 22px; line-height: 1; }
+.topbar-titles { flex: 1; min-width: 0; }
+.topbar-title { color: #fff; font-size: 20px; font-weight: 600; letter-spacing: -0.3px; }
+.topbar-sub   { color: rgba(255,255,255,0.70); font-size: 13px; margin-top: 1px; }
+.badge-city {
+background: var(--blue-badge); color: #fff;
+font-size: 12px; padding: 4px 11px;
+border-radius: 20px; white-space: nowrap; flex-shrink: 0;
+}
+.topbar-action {
+background: rgba(255,255,255,0.15); border: none; color: #fff;
+border-radius: 50%; width: 34px; height: 34px; font-size: 17px;
+display: flex; align-items: center; justify-content: center;
+flex-shrink: 0;
+}
+.topbar-action:active { background: rgba(255,255,255,0.28); }
+/* ════════════════════════════════
+SETTINGS SCREEN
+════════════════════════════════ */
+#screen-settings .scroll-body {
+flex: 1; overflow-y: auto; padding: 16px 14px 40px;
+display: flex; flex-direction: column; gap: 14px;
+}
+/* Step card */
+.step-card {
+background: var(--surface);
+border: 0.5px solid var(--border);
+border-radius: var(--radius-lg);
+padding: 20px 18px 22px;
+}
+.step-row { display: flex; gap: 14px; }
+.step-num {
+width: 34px; height: 34px; border-radius: 50%;
+background: #ccc; color: #fff;
+display: flex; align-items: center; justify-content: center;
+font-size: 16px; font-weight: 700; flex-shrink: 0;
+margin-top: 2px; transition: background 0.25s;
+}
+.step-num.active { background: var(--green-dark); }
+.step-body { flex: 1; min-width: 0; }
+.step-title { font-size: 20px; font-weight: 700; margin-bottom: 6px; color: var(--text-primary); }
+.step-desc  { font-size: 15px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 14px; }
+/* ── GPS location card ── */
+.location-display {
+display: flex; align-items: center; gap: 12px;
+padding: 14px 16px; margin-bottom: 12px;
+background: var(--green-light);
+border: 1.5px solid #7fcfa0;
+border-radius: var(--radius-md);
+}
+.location-icon { font-size: 26px; flex-shrink: 0; }
+.location-info { flex: 1; min-width: 0; }
+.location-district {
+font-size: 22px; font-weight: 700; color: var(--green-dark);
+line-height: 1.2;
+}
+.location-detail { font-size: 14px; color: var(--text-secondary); margin-top: 3px; }
+.gps-btn {
+width: 100%; padding: 18px 14px;
+background: var(--blue-btn); color: #fff; border: none;
+border-radius: var(--radius-md); font-size: 20px; font-weight: 700;
+display: flex; align-items: center; justify-content: center; gap: 10px;
+transition: opacity 0.15s; letter-spacing: 0.2px;
+}
+.gps-btn:active { opacity: 0.82; }
+.gps-btn:disabled { opacity: 0.55; }
+/* ── District manual selector (GPS fallback) ── */
+.manual-district {
+display: none; margin-top: 12px;
+}
+.manual-district.visible { display: block; }
+.field-label {
+font-size: 16px; font-weight: 600; color: var(--text-primary);
+margin-bottom: 8px; display: block;
+}
+.big-select {
+width: 100%; font-size: 19px; padding: 14px 16px;
+border: 1.5px solid var(--border-med);
+border-radius: var(--radius-md);
+background: var(--surface); color: var(--text-primary);
+appearance: none; -webkit-appearance: none;
+background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 20 20'%3E%3Cpath fill='%23666' d='M5 7l5 5 5-5z'/%3E%3C/svg%3E");
+background-repeat: no-repeat;
+background-position: right 14px center;
+background-size: 22px;
+cursor: pointer; outline: none;
+}
+.big-select:focus { border-color: var(--green-dark); }
+.big-select option { font-size: 17px; padding: 8px; }
+.or-divider {
+display: flex; align-items: center; gap: 10px;
+margin: 16px 0; color: var(--text-hint); font-size: 14px;
+}
+.or-divider::before, .or-divider::after {
+content: ''; flex: 1; border-top: 0.5px solid var(--border-med);
+}
+/* ── Village selector ── */
+.village-section { display: none; margin-top: 0; }
+.village-section.visible { display: block; }
+/* ── Route list ── */
+.route-area { display: none; margin-top: 4px; }
+.route-area.visible { display: block; }
+.route-item {
+display: flex; align-items: flex-start; gap: 12px;
+padding: 16px 14px; margin-bottom: 10px;
+border: 2px solid var(--border);
+border-radius: var(--radius-md);
+background: var(--surface); cursor: pointer;
+transition: border-color 0.15s, background 0.15s;
+}
+.route-item:active { opacity: 0.85; }
+.route-item.checked {
+border-color: var(--green-dark);
+background: var(--green-light);
+}
+/* Checkbox */
+.route-check {
+width: 28px; height: 28px; border-radius: 6px;
+border: 2.5px solid var(--border-med);
+display: flex; align-items: center; justify-content: center;
+flex-shrink: 0; margin-top: 2px;
+transition: border-color 0.15s, background 0.15s;
+font-size: 18px; color: transparent;
+}
+.route-item.checked .route-check {
+border-color: var(--green-dark);
+background: var(--green-dark);
+color: #fff;
+}
+.route-info { flex: 1; min-width: 0; }
+.route-name {
+font-size: 19px; font-weight: 700; color: var(--text-primary);
+line-height: 1.3;
+}
+.route-lineid {
+font-size: 13px; color: var(--text-hint); margin-top: 2px;
+}
+.route-time {
+font-size: 17px; font-weight: 600; color: var(--green-dark);
+margin-top: 6px;
+}
+.route-days {
+font-size: 14px; color: var(--text-secondary); margin-top: 4px;
+line-height: 1.5;
+}
+.route-stops {
+font-size: 13px; color: var(--text-hint); margin-top: 4px;
+line-height: 1.5;
+}
+.tag-today {
+display: inline-block;
+font-size: 13px; font-weight: 600; padding: 3px 10px;
+border-radius: 20px;
+background: var(--green-dark); color: #fff;
+margin-left: 8px; vertical-align: middle;
+}
+.tag-night {
+display: inline-block;
+font-size: 13px; font-weight: 600; padding: 3px 10px;
+border-radius: 20px;
+background: #2255a0; color: #fff;
+margin-left: 8px; vertical-align: middle;
+}
+/* Selection summary */
+.sel-summary {
+display: none; margin-top: 14px; padding: 14px 16px;
+background: var(--surface-alt); border: 0.5px solid var(--border);
+border-radius: var(--radius-md);
+font-size: 16px; color: var(--text-secondary); line-height: 2.0;
+}
+.sel-summary.visible { display: block; }
+.sel-summary strong { color: var(--text-primary); font-size: 17px; }
+/* Distance slider */
+.dist-label-row {
+display: flex; align-items: baseline;
+justify-content: space-between; margin-bottom: 12px;
+}
+.dist-label { font-size: 18px; font-weight: 600; }
+.dist-value { font-size: 26px; font-weight: 700; color: var(--green-dark); }
+input[type=range] {
+width: 100%; accent-color: var(--green-dark); height: 8px; cursor: pointer;
+}
+.dist-ticks {
+display: flex; justify-content: space-between;
+font-size: 13px; color: var(--text-hint); margin-top: 6px;
+}
+.dist-hint {
+margin-top: 10px; font-size: 15px; color: var(--text-secondary); line-height: 1.6;
+}
+/* Save button */
+.save-btn {
+width: 100%; padding: 20px; border: none;
+background: var(--blue-btn); color: #fff;
+border-radius: var(--radius-md); font-size: 22px; font-weight: 700;
+transition: opacity 0.15s; letter-spacing: 0.3px;
+}
+.save-btn:active { opacity: 0.82; }
+.save-btn:hover  { background: var(--blue-btn-dark); }
+/* Notice */
+.notice {
+padding: 14px 16px; border-radius: var(--radius-md);
+font-size: 16px; line-height: 1.6; display: none;
+}
+.notice.visible { display: block; }
+.notice.error { background: var(--danger-bg); border: 0.5px solid var(--danger-border); color: #8a2020; }
+.notice.info  { background: var(--green-light); border: 0.5px solid #8fcfaa; color: #1a5030; }
+/* Loading spinner */
+.spinner {
+display: none; width: 24px; height: 24px; border-radius: 50%;
+border: 3px solid rgba(255,255,255,0.35);
+border-top-color: #fff;
+animation: spin 0.7s linear infinite;
+}
+.spinner.visible { display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+/* Progress bar */
+.progress-bar {
+display: none; margin-top: 12px; padding: 12px 14px;
+background: var(--green-light); border: 0.5px solid #7fcfa0;
+border-radius: var(--radius-md);
+font-size: 15px; color: var(--green-dark);
+align-items: center; gap: 10px;
+}
+.progress-bar.visible { display: flex; }
+.progress-spin {
+width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0;
+border: 3px solid rgba(26,107,60,0.25);
+border-top-color: var(--green-dark);
+animation: spin 0.8s linear infinite;
+}
+/* ════════════════════════════════
+TRACKING SCREEN — Simplified Layout
+════════════════════════════════ */
+/* ── Tracking topbar (blue) ── */
+.topbar-track {
+background: #1a52a8;
+padding: 14px 18px 12px;
+display: flex; align-items: center; gap: 10px;
+flex-shrink: 0; position: sticky; top: 0; z-index: 100;
+}
+.topbar-track .topbar-title { color: #fff; font-size: 20px; font-weight: 700; }
+.topbar-track .topbar-sub   { color: rgba(255,255,255,0.70); font-size: 13px; margin-top: 1px; }
+.topbar-track .badge-city   { background: rgba(255,255,255,0.20); }
+.gear-btn {
+margin-left: auto;
+background: rgba(255,255,255,0.15); border: none; color: #fff;
+border-radius: 50%; width: 40px; height: 40px; font-size: 20px;
+display: flex; align-items: center; justify-content: center;
+cursor: pointer; flex-shrink: 0;
+}
+.gear-btn:active { background: rgba(255,255,255,0.30); }
+/* ── Wake lock banner ── */
+.wake-banner {
+background: #1a52a8; color: rgba(255,255,255,0.85);
+font-size: 13px; text-align: center; padding: 5px 12px;
+display: none;
+}
+.wake-banner.visible { display: block; }
+/* ── Scroll body ── */
+.track-scroll {
+flex: 1; overflow-y: auto;
+padding: 12px 12px 20px;
+display: flex; flex-direction: column; gap: 10px;
+}
+/* ── Distance card (hero) - Simplified ── */
+.dist-hero {
+background: #1a52a8;
+border-radius: var(--radius-lg);
+overflow: hidden;
+}
+.dist-hero-top {
+padding: 14px 18px 8px;
+display: flex; align-items: center; justify-content: space-between;
+}
+.dist-hero-label { font-size: 15px; color: rgba(255,255,255,0.70); }
+.dist-hero-update {
+display: flex; align-items: center; gap: 6px;
+font-size: 13px; color: rgba(255,255,255,0.65);
+}
+.dist-hero-dot {
+width: 8px; height: 8px; border-radius: 50%;
+background: #7ef0a8; flex-shrink: 0;
+}
+.dist-hero-num-row {
+padding: 0 18px 14px;
+display: flex; align-items: baseline; gap: 8px;
+}
+.dist-hero-num  { font-size: 72px; font-weight: 700; color: #fff; line-height: 1; }
+.dist-hero-unit { font-size: 24px; color: rgba(255,255,255,0.80); font-weight: 500; }
+.dist-hero-eta {
+padding: 10px 18px 12px;
+border-top: 0.5px solid rgba(255,255,255,0.15);
+display: flex; justify-content: space-between; align-items: center;
+}
+.dist-hero-eta-label { font-size: 14px; color: rgba(255,255,255,0.60); }
+.dist-hero-eta-val   { font-size: 18px; font-weight: 700; color: #fff; margin-top: 3px; }
+.dist-hero-sched       { text-align: right; }
+.dist-hero-sched-val   { font-size: 15px; color: rgba(255,255,255,0.75); margin-top: 3px; }
+/* Status color bar at bottom of hero card */
+.status-bar {
+height: 5px; width: 100%;
+background: #4caf8a; /* default: green */
+transition: background 0.4s;
+}
+.status-bar.warning { background: #f0c040; }
+.status-bar.danger  { background: #e05050; }
+/* ── Map wrapper + GPS button ── */
+.map-wrap {
+position: relative; border-radius: var(--radius-lg);
+overflow: hidden; border: 0.5px solid #c8d8f0;
+flex: 1;
+min-height: 400px;
+}
+#map {
+height: 100%;
+width: 100%;
+z-index: 1;
+}
+.map-gps-btn {
+position: absolute; top: 10px; right: 10px; z-index: 10;
+width: 40px; height: 40px; border-radius: 50%;
+background: #fff; border: 1.5px solid #c8d8f0;
+font-size: 20px; line-height: 1; cursor: pointer;
+display: flex; align-items: center; justify-content: center;
+box-shadow: 0 2px 6px rgba(0,0,0,0.18);
+}
+.map-gps-btn:active { background: #e6eef9; }
+/* ── Voice row ── */
+.voice-row {
+display: flex; align-items: center; justify-content: space-between;
+padding: 14px 18px;
+background: #fff; border: 0.5px solid #c8d8f0;
+border-radius: var(--radius-md);
+}
+.voice-label { font-size: 18px; color: var(--text-primary); }
+.toggle-wrap {
+width: 54px; height: 30px; border-radius: 15px;
+background: var(--voice-on); position: relative;
+cursor: pointer; border: none; transition: background 0.2s;
+flex-shrink: 0;
+}
+.toggle-wrap.off { background: #bbb; }
+.toggle-thumb {
+width: 24px; height: 24px; border-radius: 50%; background: #fff;
+position: absolute; top: 3px; right: 3px;
+transition: right 0.2s, left 0.2s;
+}
+.toggle-wrap.off .toggle-thumb { right: auto; left: 3px; }
+/* ── Track button ── */
+.track-btn {
+width: 100%; padding: 18px; border: none;
+border-radius: var(--radius-md); font-size: 20px; font-weight: 700;
+letter-spacing: 0.3px; cursor: pointer;
+transition: opacity 0.15s;
+}
+.track-btn.start {
+background: #1a52a8; color: #fff;
+}
+.track-btn.stop {
+background: var(--danger); color: #fff;
+}
+.track-btn:active { opacity: 0.82; }
+/* ── Arrived overlay ── */
+#arrived-overlay {
+display: none; position: fixed; inset: 0; z-index: 500;
+background: rgba(26,82,168,0.92);
+flex-direction: column; align-items: center; justify-content: center;
+padding: 32px;
+}
+#arrived-overlay.visible { display: flex; }
+.arrived-icon  { font-size: 80px; margin-bottom: 20px; }
+.arrived-title { font-size: 32px; font-weight: 700; color: #fff; text-align: center; margin-bottom: 12px; }
+.arrived-sub   { font-size: 18px; color: rgba(255,255,255,0.80); text-align: center; margin-bottom: 32px; line-height: 1.6; }
+.arrived-btn   {
+padding: 18px 48px; background: #fff; color: #1a52a8;
+border: none; border-radius: var(--radius-md);
+font-size: 20px; font-weight: 700; cursor: pointer;
+}
+/* ── Permission overlay ── */
+#perm-overlay {
+display: none; position: fixed; inset: 0; z-index: 999;
+background: rgba(0,0,0,0.55);
+align-items: center; justify-content: center; padding: 24px;
+}
+#perm-overlay.visible { display: flex; }
+.perm-box {
+background: #fff; border-radius: var(--radius-lg);
+padding: 28px 24px; max-width: 340px; width: 100%; text-align: center;
+}
+.perm-icon { font-size: 44px; margin-bottom: 12px; }
+.perm-title { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
+.perm-desc  { font-size: 15px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 20px; }
+.perm-btn {
+width: 100%; padding: 15px; background: var(--blue-btn);
+color: #fff; border: none; border-radius: var(--radius-md);
+font-size: 18px; font-weight: 500;
+}
+/* ── Utility ── */
+.hidden { display: none !important; }
+</style>
 </head>
 <body>
-
 <!-- ═══════════════════════════════════════
-     SCREEN 1: SETTINGS
+SCREEN 1: SETTINGS
 ═══════════════════════════════════════ -->
 <div id="screen-settings" class="screen active">
-
-  <div class="topbar">
-    <div class="topbar-icon">🗑</div>
-    <div class="topbar-titles">
-      <div class="topbar-title">垃圾車快到了</div>
-      <div class="topbar-sub">路線設定</div>
-    </div>
-    <div class="badge-city">新北市</div>
-  </div>
-
-  <div class="scroll-body">
-
-    <!-- Notice bar -->
-    <div class="notice" id="notice"></div>
-
-    <!-- ══ STEP 1: 確認您的位置 ══ -->
-    <div class="step-card">
-      <div class="step-row">
-        <div class="step-num active" id="snum1">1</div>
-        <div class="step-body">
-          <div class="step-title">確認您的位置</div>
-          <div class="step-desc">讓系統自動找到您所在的行政區</div>
-
-          <!-- Location display (shown after GPS success) -->
-          <div class="location-display hidden" id="locationDisplay">
-            <div class="location-icon">📍</div>
-            <div class="location-info">
-              <div class="location-district" id="locationDistrict">—</div>
-              <div class="location-detail" id="locationDetail">已取得您的位置</div>
-            </div>
-          </div>
-
-          <!-- GPS button -->
-          <button class="gps-btn" id="gpsBtn" onclick="App.locateByGPS()">
-            <span class="spinner" id="gpsSpinner"></span>
-            <span id="gpsBtnText">📍 自動定位我的位置</span>
-          </button>
-
-          <!-- Progress -->
-          <div class="progress-bar" id="step1Progress">
-            <div class="progress-spin"></div>
-            <span id="step1ProgressMsg">處理中…</span>
-          </div>
-
-          <!-- GPS failed: manual district selector -->
-          <div class="manual-district" id="manualDistrict">
-            <div class="or-divider"><span>或者手動選擇</span></div>
-            <label class="field-label" for="districtSelect">選擇您所在的行政區</label>
-            <select class="big-select" id="districtSelect" onchange="App.onDistrictChange(this.value)">
-              <option value="">── 請選擇行政區 ──</option>
-            </select>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ══ STEP 2: 選擇您的里 ══ -->
-    <div class="step-card" id="step2Card">
-      <div class="step-row">
-        <div class="step-num" id="snum2">2</div>
-        <div class="step-body">
-          <div class="step-title">選擇您所在的里</div>
-          <div class="step-desc" id="step2desc">完成步驟 1 後，這裡會出現里別選單</div>
-
-          <div class="village-section" id="villageSection">
-            <label class="field-label" for="villageSelect">選擇里別</label>
-            <select class="big-select" id="villageSelect" onchange="App.onVillageChange(this.value)">
-              <option value="">── 請選擇里別 ──</option>
-            </select>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ══ STEP 3: 選擇路線 ══ -->
-    <div class="step-card" id="step3Card">
-      <div class="step-row">
-        <div class="step-num" id="snum3">3</div>
-        <div class="step-body">
-          <div class="step-title">選擇您要追蹤的路線</div>
-          <div class="step-desc" id="step3desc">選好里別後，這裡會列出所有路線</div>
-
-          <div class="route-area" id="routeArea"></div>
-
-          <!-- Selection summary -->
-          <div class="sel-summary hidden" id="selSummary"></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ══ STEP 4: 通知距離 ══ -->
-    <div class="step-card" id="step4Card">
-      <div class="step-row">
-        <div class="step-num" id="snum4">4</div>
-        <div class="step-body">
-          <div class="step-title">距離多遠開始通知？</div>
-          <div style="margin-top:14px;">
-            <div class="dist-label-row">
-              <div class="dist-label">提前通知距離</div>
-              <div class="dist-value" id="distDisplay">500 公尺</div>
-            </div>
-            <input type="range" id="distSlider" min="100" max="1000" step="100" value="500"
-              oninput="App.updateDist(this.value)">
-            <div class="dist-ticks">
-              <span>100m</span><span>300m</span><span>500m</span><span>700m</span><span>1km</span>
-            </div>
-            <div class="dist-hint" id="distHint">
-              垃圾車進入 <strong>500 公尺</strong>範圍時，開始每 2 分鐘語音播報一次
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ══ STEP 5: 語音設定 ══ -->
-    <div class="step-card" id="step5Card">
-      <div class="step-row">
-        <div class="step-num active" id="snum5">5</div>
-        <div class="step-body">
-          <div class="step-title">語音播報設定</div>
-          <div class="step-desc">選擇語音播報的聲音類型</div>
-
-          <label class="field-label">選擇聲音</label>
-          <div class="voice-choice-group">
-            <label class="voice-choice" id="vcFemale">
-              <input type="radio" name="voiceType" value="female" checked
-                onchange="App.onVoiceTypeChange('female')">
-              <span class="vc-icon">👩</span>
-              <span class="vc-label">女聲</span>
-            </label>
-            <label class="voice-choice" id="vcMale">
-              <input type="radio" name="voiceType" value="male"
-                onchange="App.onVoiceTypeChange('male')">
-              <span class="vc-icon">👨</span>
-              <span class="vc-label">男聲</span>
-            </label>
-            <label class="voice-choice" id="vcCustom">
-              <input type="radio" name="voiceType" value="custom"
-                onchange="App.onVoiceTypeChange('custom')">
-              <span class="vc-icon">🎙</span>
-              <span class="vc-label">客製化</span>
-            </label>
-          </div>
-
-          <!-- Custom voice unlock field (hidden until code entered) -->
-          <div class="custom-voice-row" id="customVoiceRow">
-            <label class="field-label" style="margin-top:12px;">輸入啟用碼</label>
-            <input type="password" class="addr-input" id="customVoiceCode"
-              placeholder="請輸入啟用碼"
-              oninput="App.onCustomCodeInput(this.value)">
-            <div class="custom-voice-status hidden" id="customVoiceStatus">
-              ✅ 已啟用客製化人聲（MP3 音檔）
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Save -->
-    <button class="save-btn" onclick="App.saveSettings()">
-      ✅ 儲存設定，開始追蹤
-    </button>
-
-  </div><!-- /scroll-body -->
+<div class="topbar">
+<div class="topbar-icon">🗑</div>
+<div class="topbar-titles">
+<div class="topbar-title">垃圾車快到了</div>
+<div class="topbar-sub">路線設定</div>
+</div>
+<div class="badge-city">新北市</div>
+</div>
+<div class="scroll-body">
+<!-- Notice bar -->
+<div class="notice" id="notice"></div>
+<!-- ══ STEP 1: 確認您的位置 ══ -->
+<div class="step-card">
+<div class="step-row">
+<div class="step-num active" id="snum1">1</div>
+<div class="step-body">
+<div class="step-title">確認您的位置</div>
+<div class="step-desc">讓系統自動找到您所在的行政區</div>
+<!-- Location display (shown after GPS success) -->
+<div class="location-display hidden" id="locationDisplay">
+<div class="location-icon">📍</div>
+<div class="location-info">
+<div class="location-district" id="locationDistrict">—</div>
+<div class="location-detail" id="locationDetail">已取得您的位置</div>
+</div>
+</div>
+<!-- GPS button -->
+<button class="gps-btn" id="gpsBtn" onclick="App.locateByGPS()">
+<span class="spinner" id="gpsSpinner"></span>
+<span id="gpsBtnText">📍 自動定位我的位置</span>
+</button>
+<!-- Progress -->
+<div class="progress-bar" id="step1Progress">
+<div class="progress-spin"></div>
+<span id="step1ProgressMsg">處理中…</span>
+</div>
+<!-- GPS failed: manual district selector -->
+<div class="manual-district" id="manualDistrict">
+<div class="or-divider"><span>或者手動選擇</span></div>
+<label class="field-label" for="districtSelect">選擇您所在的行政區</label>
+<select class="big-select" id="districtSelect" onchange="App.onDistrictChange(this.value)">
+<option value="">── 請選擇行政區 ──</option>
+</select>
+</div>
+</div>
+</div>
+</div>
+<!-- ══ STEP 2: 選擇您的里 ══ -->
+<div class="step-card" id="step2Card">
+<div class="step-row">
+<div class="step-num" id="snum2">2</div>
+<div class="step-body">
+<div class="step-title">選擇您所在的里</div>
+<div class="step-desc" id="step2desc">完成步驟 1 後，這裡會出現里別選單</div>
+<div class="village-section" id="villageSection">
+<label class="field-label" for="villageSelect">選擇里別</label>
+<select class="big-select" id="villageSelect" onchange="App.onVillageChange(this.value)">
+<option value="">── 請選擇里別 ──</option>
+</select>
+</div>
+</div>
+</div>
+</div>
+<!-- ══ STEP 3: 選擇路線 ══ -->
+<div class="step-card" id="step3Card">
+<div class="step-row">
+<div class="step-num" id="snum3">3</div>
+<div class="step-body">
+<div class="step-title">選擇您要追蹤的路線</div>
+<div class="step-desc" id="step3desc">選好里別後，這裡會列出所有路線</div>
+<div class="route-area" id="routeArea"></div>
+<!-- Selection summary -->
+<div class="sel-summary hidden" id="selSummary"></div>
+</div>
+</div>
+</div>
+<!-- ══ STEP 4: 通知距離 ══ -->
+<div class="step-card" id="step4Card">
+<div class="step-row">
+<div class="step-num" id="snum4">4</div>
+<div class="step-body">
+<div class="step-title">距離多遠開始通知？</div>
+<div style="margin-top:14px;">
+<div class="dist-label-row">
+<div class="dist-label">提前通知距離</div>
+<div class="dist-value" id="distDisplay">500 公尺</div>
+</div>
+<input type="range" id="distSlider" min="100" max="1000" step="100" value="500"
+oninput="App.updateDist(this.value)">
+<div class="dist-ticks">
+<span>100m</span><span>300m</span><span>500m</span><span>700m</span><span>1km</span>
+</div>
+<div class="dist-hint" id="distHint">
+垃圾車進入 <strong>500 公尺</strong>範圍時，開始每 2 分鐘語音播報一次
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- ══ STEP 5: 語音設定 ══ -->
+<div class="step-card" id="step5Card">
+<div class="step-row">
+<div class="step-num active" id="snum5">5</div>
+<div class="step-body">
+<div class="step-title">語音播報設定</div>
+<div class="step-desc">選擇語音播報的聲音類型</div>
+<label class="field-label">選擇聲音</label>
+<div class="voice-choice-group">
+<label class="voice-choice" id="vcFemale">
+<input type="radio" name="voiceType" value="female" checked
+onchange="App.onVoiceTypeChange('female')">
+<span class="vc-icon">👩</span>
+<span class="vc-label">女聲</span>
+</label>
+<label class="voice-choice" id="vcMale">
+<input type="radio" name="voiceType" value="male"
+onchange="App.onVoiceTypeChange('male')">
+<span class="vc-icon">👨</span>
+<span class="vc-label">男聲</span>
+</label>
+<label class="voice-choice" id="vcCustom">
+<input type="radio" name="voiceType" value="custom"
+onchange="App.onVoiceTypeChange('custom')">
+<span class="vc-icon">🎙</span>
+<span class="vc-label">客製化</span>
+</label>
+</div>
+<!-- Custom voice unlock field (hidden until code entered) -->
+<div class="custom-voice-row" id="customVoiceRow">
+<label class="field-label" style="margin-top:12px;">輸入啟用碼</label>
+<input type="password" class="addr-input" id="customVoiceCode"
+placeholder="請輸入啟用碼"
+oninput="App.onCustomCodeInput(this.value)">
+<div class="custom-voice-status hidden" id="customVoiceStatus">
+✅ 已啟用客製化人聲（MP3 音檔）
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Save -->
+<button class="save-btn" onclick="App.saveSettings()">
+✅ 儲存設定，開始追蹤
+</button>
+</div><!-- /scroll-body -->
 </div><!-- /screen-settings -->
-
-
 <!-- ═══════════════════════════════════════
-     SCREEN 2: TRACKING
+SCREEN 2: TRACKING - SIMPLIFIED
 ═══════════════════════════════════════ -->
 <div id="screen-tracking" class="screen">
-
-  <!-- Blue topbar with gear icon -->
-  <div class="topbar-track">
-    <div class="topbar-icon">🗑</div>
-    <div class="topbar-titles">
-      <div class="topbar-title">垃圾車快到了</div>
-      <div class="topbar-sub" id="trackSub">尚未開始監控</div>
-    </div>
-    <div class="badge-city">新北市</div>
-    <button class="gear-btn" onclick="App.showScreen('settings')" title="設定">⚙</button>
-  </div>
-
-  <!-- Wake lock notice (shown when WakeLock not supported) -->
-  <div class="wake-banner" id="wakeBanner">⚠️ 請保持螢幕開啟以確保監控正常運作</div>
-
-  <div class="track-scroll">
-
-    <!-- Distance hero card — route name inside, color status bar at bottom -->
-    <div class="dist-hero" id="distHeroCard">
-      <div class="dist-hero-top">
-        <div class="dist-hero-label">垃圾車距離您</div>
-        <div class="dist-hero-update">
-          <div class="dist-hero-dot" id="heroUpdDot" style="background:#bbb;"></div>
-          <span id="heroUpdTime">—</span>
-        </div>
-      </div>
-      <div class="dist-hero-num-row">
-        <div class="dist-hero-num"  id="heroDistNum">—</div>
-        <div class="dist-hero-unit" id="heroDistUnit">公尺</div>
-      </div>
-      <div class="dist-hero-eta">
-        <div>
-          <div class="dist-hero-eta-label">預計抵達</div>
-          <div class="dist-hero-eta-val" id="heroEtaVal">—</div>
-        </div>
-        <div class="dist-hero-sched">
-          <div class="dist-hero-eta-label">追蹤路線</div>
-          <div class="dist-hero-route-name" id="heroRouteName">—</div>
-        </div>
-      </div>
-      <!-- Status color bar -->
-      <div class="status-bar" id="statusBar"></div>
-    </div>
-
-    <!-- Map with GPS-locate button -->
-    <div class="map-wrap">
-      <div id="map"></div>
-      <button class="map-gps-btn" id="mapGpsBtn" onclick="App.relocateMap()" title="回到我的位置">
-        📍
-      </button>
-    </div>
-
-    <!-- Voice toggle -->
-    <div class="voice-row">
-      <div class="voice-label">🔊 語音播報</div>
-      <button class="toggle-wrap" id="voiceToggle" onclick="App.toggleVoice()">
-        <div class="toggle-thumb"></div>
-      </button>
-    </div>
-
-    <!-- Countdown -->
-    <div class="countdown-row" id="countdownRow"></div>
-
-    <!-- Main action button -->
-    <button class="track-btn start" id="trackBtn" onclick="App.toggleTracking()">
-      ▶ 開始監控垃圾車位置
-    </button>
-
-  </div><!-- /track-scroll -->
+<!-- Blue topbar with gear icon -->
+<div class="topbar-track">
+<div class="topbar-icon">🗑</div>
+<div class="topbar-titles">
+<div class="topbar-title">垃圾車快到了</div>
+<div class="topbar-sub" id="trackSub">尚未開始監控</div>
+</div>
+<div class="badge-city">新北市</div>
+<button class="gear-btn" onclick="App.showScreen('settings')" title="設定">⚙</button>
+</div>
+<!-- Wake lock notice (shown when WakeLock not supported) -->
+<div class="wake-banner" id="wakeBanner">⚠️ 請保持螢幕開啟以確保監控正常運作</div>
+<div class="track-scroll">
+<!-- Distance hero card - simplified -->
+<div class="dist-hero" id="distHeroCard">
+<div class="dist-hero-top">
+<div class="dist-hero-label">垃圾車距離您</div>
+<div class="dist-hero-update">
+<div class="dist-hero-dot" id="heroUpdDot" style="background:#bbb;"></div>
+<span id="heroUpdTime">—</span>
+</div>
+</div>
+<div class="dist-hero-num-row">
+<div class="dist-hero-num"  id="heroDistNum">—</div>
+<div class="dist-hero-unit" id="heroDistUnit">公尺</div>
+</div>
+<div class="dist-hero-eta">
+<div>
+<div class="dist-hero-eta-label">預計抵達</div>
+<div class="dist-hero-eta-val" id="heroEtaVal">—</div>
+</div>
+</div>
+<!-- Status color bar -->
+<div class="status-bar" id="statusBar"></div>
+</div>
+<!-- Map with GPS-locate button - EXPANDED -->
+<div class="map-wrap">
+<div id="map"></div>
+<button class="map-gps-btn" id="mapGpsBtn" onclick="App.relocateMap()" title="回到我的位置">
+📍
+</button>
+</div>
+<!-- Voice toggle -->
+<div class="voice-row">
+<div class="voice-label">🔊 語音播報</div>
+<button class="toggle-wrap" id="voiceToggle" onclick="App.toggleVoice()">
+<div class="toggle-thumb"></div>
+</button>
+</div>
+<!-- Main action button -->
+<button class="track-btn start" id="trackBtn" onclick="App.toggleTracking()">
+▶ 開始監控垃圾車位置
+</button>
+</div><!-- /track-scroll -->
 </div><!-- /screen-tracking -->
-
 <!-- Arrived overlay -->
 <div id="arrived-overlay">
-  <div class="arrived-icon">🎉</div>
-  <div class="arrived-title">垃圾車到了！</div>
-  <div class="arrived-sub">請帶垃圾下樓，<br>垃圾車就在附近！</div>
-  <button class="arrived-btn" onclick="App.dismissArrived()">確認，關閉通知</button>
+<div class="arrived-icon">🎉</div>
+<div class="arrived-title">垃圾車到了！</div>
+<div class="arrived-sub">請帶垃圾下樓，<br>垃圾車就在附近！</div>
+<button class="arrived-btn" onclick="App.dismissArrived()">確認，關閉通知</button>
 </div>
-
-
 <!-- Location permission overlay -->
 <div id="perm-overlay">
-  <div class="perm-box">
-    <div class="perm-icon">📍</div>
-    <div class="perm-title">需要您的位置</div>
-    <div class="perm-desc">為了計算垃圾車距離，需要取得您的目前位置。請在瀏覽器彈出視窗中允許定位。</div>
-    <button class="perm-btn" onclick="App.requestLocation()">允許定位，開始使用</button>
-  </div>
+<div class="perm-box">
+<div class="perm-icon">📍</div>
+<div class="perm-title">需要您的位置</div>
+<div class="perm-desc">為了計算垃圾車距離，需要取得您的目前位置。請在瀏覽器彈出視窗中允許定位。</div>
+<button class="perm-btn" onclick="App.requestLocation()">允許定位，開始使用</button>
 </div>
-
-
+</div>
 <!-- Leaflet JS -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
 <script>
 'use strict';
-
 /* ═══════════════════════════════════════════════════
-   CONSTANTS
+CONSTANTS
 ═══════════════════════════════════════════════════ */
 const API_GPS    = 'https://data.ntpc.gov.tw/api/datasets/28ab4122-60e1-4065-98e5-abccb69aaca6/json?size=200';
-// Route data: /csv/file returns the full dataset in one request, no pagination needed.
-// Confirmed working without CORS issues from browser (tested April 2026).
 const CSV_FULL   = 'https://data.ntpc.gov.tw/api/datasets/edc3ad26-8ae7-4916-a00b-bc6048d19bf8/csv/file';
 const NOMINATIM  = 'https://nominatim.openstreetmap.org';
 const UPDATE_MS  = 2 * 60 * 1000;
 const STORAGE_KEY = 'gtSettings';
-
 /* ═══════════════════════════════════════════════════
-   APP STATE
+APP STATE
 ═══════════════════════════════════════════════════ */
 const State = {
-  /* settings */
-  distAlert:       500,
-  currentDistrict: null,      // e.g. "新店區"
-  currentVillage:  null,      // e.g. "青潭里"
-  checkedRoutes:   new Set(), // Set of lineid strings user checked
-  allCheckedRoutes:[],        // array copy for storage
-  cachedRouteJSON: null,      // full JSON dataset (session only, not persisted)
-  sel:             { noon: null, night: null }, // primary route per shift (for tracking screen)
-  routeData:       { noon: [], night: [] },
-
-  /* tracking */
-  activeTab:    'noon',
-  tracking:     false,
-  voiceOn:      true,
-  userLat:      null,
-  userLng:      null,
-  gpsData:      [],
-  updateTimer:  null,
-  countdownTimer: null,
-  countdown:    0,
-  map:          null,
-  markers:      { truck: null, user: null },
-  geoWatchId:          null,
-  wakeLock:            null,
-  activeLineid:        null,
-  arrivedShown:        false,
-  voiceType:           'female',
-  customVoiceEnabled:  false,
-  currentAudio:        null,
-  audioCtx:            null,
-  savedRouteInfo:      [],   // [{lineid, linename, time}] persisted to localStorage
-  _cityField:          'city',
-  _villageField:       'village',
+/* settings */
+distAlert:       500,
+currentDistrict: null,
+currentVillage:  null,
+checkedRoutes:   new Set(),
+allCheckedRoutes:[],
+cachedRouteJSON: null,
+sel:             { noon: null, night: null },
+routeData:       { noon: [], night: [] },
+/* tracking */
+activeTab:    'noon',
+tracking:     false,
+voiceOn:      true,
+userLat:      null,
+userLng:      null,
+gpsData:      [],
+updateTimer:  null,
+countdownTimer: null,
+countdown:    0,
+map:          null,
+markers:      { truck: null, user: null },
+geoWatchId:          null,
+wakeLock:            null,
+activeLineid:        null,
+arrivedShown:        false,
+voiceType:           'female',
+customVoiceEnabled:  false,
+currentAudio:        null,
+audioCtx:            null,
+savedRouteInfo:      [],
+_cityField:          'city',
+_villageField:       'village',
 };
-
 /* ═══════════════════════════════════════════════════
-   UTILITIES
+UTILITIES
 ═══════════════════════════════════════════════════ */
 function haversine(lat1, lng1, lat2, lng2) {
-  const R = 6371000, r = Math.PI / 180;
-  const dLat = (lat2 - lat1) * r, dLng = (lng2 - lng1) * r;
-  const a = Math.sin(dLat/2)**2 +
-            Math.cos(lat1*r) * Math.cos(lat2*r) * Math.sin(dLng/2)**2;
-  return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
+const R = 6371000, r = Math.PI / 180;
+const dLat = (lat2 - lat1) * r, dLng = (lng2 - lng1) * r;
+const a = Math.sin(dLat/2)**2 +
+Math.cos(lat1*r) * Math.cos(lat2*r) * Math.sin(dLng/2)**2;
+return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
 }
-
-// Generic JSON fetcher with multiple CORS proxy fallbacks
-// Used for: GPS real-time data (API_GPS), Nominatim reverse geocoding
 async function fetchJSON(url) {
-  const proxies = [
-    url,                                                            // direct
-    `https://corsproxy.io/?${encodeURIComponent(url)}`,            // corsproxy.io
-    `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`, // allorigins
-    `https://thingproxy.freeboard.io/fetch/${url}`,                // thingproxy
-  ];
-  for (const u of proxies) {
-    try {
-      const r = await fetch(u, { cache: 'no-store', headers: { Accept: 'application/json' } });
-      if (r.ok) {
-        const text = await r.text();
-        return JSON.parse(text);
-      }
-      console.warn('[GarbageTruck] fetchJSON HTTP', r.status, u.slice(0,60));
-    } catch(e) {
-      console.warn('[GarbageTruck] fetchJSON error', e.message, u.slice(0,60));
-    }
-  }
-  throw new Error('無法連接資料來源，請確認網路連線');
+const proxies = [
+url,
+`https://corsproxy.io/?${encodeURIComponent(url)}`,
+`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+`https://thingproxy.freeboard.io/fetch/${url}`,
+];
+for (const u of proxies) {
+try {
+const r = await fetch(u, { cache: 'no-store', headers: { Accept: 'application/json' } });
+if (r.ok) {
+const text = await r.text();
+return JSON.parse(text);
 }
-
+console.warn('[GarbageTruck] fetchJSON HTTP', r.status, u.slice(0,60));
+} catch(e) {
+console.warn('[GarbageTruck] fetchJSON error', e.message, u.slice(0,60));
+}
+}
+throw new Error('無法連接資料來源，請確認網路連線');
+}
 function todayDayKey() {
-  const days = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
-  return days[new Date().getDay()];
+const days = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+return days[new Date().getDay()];
 }
-
 function saveToStorage() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({
-    distAlert:          State.distAlert,
-    currentDistrict:    State.currentDistrict,
-    currentVillage:     State.currentVillage,
-    allCheckedRoutes:   State.allCheckedRoutes,
-    savedRouteInfo:     State.savedRouteInfo,   // [{lineid, linename, time}]
-    sel:                State.sel,
-    voiceType:          State.voiceType,
-    customVoiceEnabled: State.customVoiceEnabled,
-  }));
+localStorage.setItem(STORAGE_KEY, JSON.stringify({
+distAlert:          State.distAlert,
+currentDistrict:    State.currentDistrict,
+currentVillage:     State.currentVillage,
+allCheckedRoutes:   State.allCheckedRoutes,
+savedRouteInfo:     State.savedRouteInfo,
+sel:                State.sel,
+voiceType:          State.voiceType,
+customVoiceEnabled: State.customVoiceEnabled,
+}));
 }
-
 function loadFromStorage() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return false;
-    const s = JSON.parse(raw);
-    State.distAlert          = s.distAlert          || 500;
-    State.currentDistrict    = s.currentDistrict    || null;
-    State.currentVillage     = s.currentVillage     || null;
-    State.allCheckedRoutes   = s.allCheckedRoutes   || [];
-    State.savedRouteInfo     = s.savedRouteInfo     || [];
-    State.checkedRoutes      = new Set(State.allCheckedRoutes);
-    State.sel                = s.sel                || { noon: null, night: null };
-    State.voiceType          = s.voiceType          || 'female';
-    State.customVoiceEnabled = s.customVoiceEnabled || false;
-    return State.allCheckedRoutes.length > 0;
-  } catch { return false; }
+try {
+const raw = localStorage.getItem(STORAGE_KEY);
+if (!raw) return false;
+const s = JSON.parse(raw);
+State.distAlert          = s.distAlert          || 500;
+State.currentDistrict    = s.currentDistrict    || null;
+State.currentVillage     = s.currentVillage     || null;
+State.allCheckedRoutes   = s.allCheckedRoutes   || [];
+State.savedRouteInfo     = s.savedRouteInfo     || [];
+State.checkedRoutes      = new Set(State.allCheckedRoutes);
+State.sel                = s.sel                || { noon: null, night: null };
+State.voiceType          = s.voiceType          || 'female';
+State.customVoiceEnabled = s.customVoiceEnabled || false;
+return State.allCheckedRoutes.length > 0;
+} catch { return false; }
 }
-
 function etaText(meters) {
-  if (meters < 100) return '即將到達';
-  const mins = Math.ceil(meters / 130);
-  return `約 ${mins} 分鐘後`;
+if (meters < 100) return '即將到達';
+const mins = Math.ceil(meters / 130);
+return `約 ${mins} 分鐘後`;
 }
-
 /* ═══════════════════════════════════════════════════
-   MAIN APP OBJECT
+MAIN APP OBJECT
 ═══════════════════════════════════════════════════ */
 const App = {
-
-  /* ── Init ── */
-  init() {
-    const hasSettings = loadFromStorage();
-    const hasRoutes   = State.allCheckedRoutes && State.allCheckedRoutes.length > 0;
-    if (hasSettings && hasRoutes) {
-      this.showScreen('tracking');
-    } else {
-      this.showScreen('settings');
-    }
-    this.updateDist(State.distAlert);
-  },
-
-  /* ── Screen switching ── */
-  showScreen(name) {
-    try {
-      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-      const el = document.getElementById('screen-' + name);
-      if (!el) { console.error('[GarbageTruck] Screen not found:', name); return; }
-      el.classList.add('active');
-
-      if (name === 'settings') {
-        try { this.populateSettingsFromState(); } catch(e) { console.warn(e); }
-        if (State.currentDistrict) {
-          try { this._showLocationCard(State.currentDistrict, '已儲存的位置'); } catch(e) {}
-          try { this._activateStep(State.currentVillage ? 3 : 2); } catch(e) {}
-        }
-        if (State.tracking) {
-          try { this._stopTracking(); } catch(e) {}
-        }
-      }
-
-      if (name === 'tracking') {
-        try { this.initTrackingScreen(); } catch(e) { console.warn(e); }
-      }
-    } catch(e) {
-      console.error('[GarbageTruck] showScreen error:', e);
-    }
-  },
-
-  /* ── SETTINGS SCREEN ── */
-
-  // Repopulate settings UI if returning from tracking screen
-  populateSettingsFromState() {
-    document.getElementById('distSlider').value = State.distAlert;
-    this.updateDist(State.distAlert);
-    // Restore voice type radio
-    const radios = document.querySelectorAll('input[name="voiceType"]');
-    radios.forEach(r => { r.checked = (r.value === State.voiceType); });
-    if (State.voiceType === 'custom') {
-      document.getElementById('customVoiceRow').classList.add('visible');
-      if (State.customVoiceEnabled) {
-        document.getElementById('customVoiceCode').value = '1212';
-        document.getElementById('customVoiceStatus').classList.remove('hidden');
-      }
-    }
-  },
-
-  showNotice(msg, type = 'error') {
-    const el = document.getElementById('notice');
-    el.textContent = msg;
-    el.className = `notice ${type} visible`;
-    setTimeout(() => el.classList.remove('visible'), 6000);
-  },
-
-  /* ════════════════════════════════════════════════
-     STEP 1 — GPS LOCATION
-  ════════════════════════════════════════════════ */
-
-  async locateByGPS() {
-    if (!navigator.geolocation) {
-      this.showNotice('⚠️ 您的瀏覽器不支援自動定位，請手動選擇行政區', 'error');
-      this._showManualDistrict();
-      return;
-    }
-    this._setGpsBtn(true, '定位中，請稍候…');
-    this._showProgress('正在取得您的位置…');
-
-    navigator.geolocation.getCurrentPosition(
-      async pos => {
-        State.userLat = pos.coords.latitude;
-        State.userLng = pos.coords.longitude;
-
-        // Step A: get district name from GPS (fast, ~1s)
-        this._showProgress('判斷行政區中…');
-        const district = await this._getDistrictFromCoords(pos.coords.latitude, pos.coords.longitude);
-        const detectedDistrict = district
-          || this._guessDistrictFromCoords(pos.coords.latitude, pos.coords.longitude);
-
-        if (!detectedDistrict) {
-          this._setGpsBtn(false, '📍 重新定位');
-          this._hideProgress();
-          this.showNotice('⚠️ 無法判斷行政區，請手動選擇', 'error');
-          this._showManualDistrict();
-          return;
-        }
-
-        // Show district immediately so user sees progress
-        State.currentDistrict = detectedDistrict;
-        this._showLocationCard(detectedDistrict, '新北市 · GPS 自動定位');
-        this._setGpsBtn(false, '📍 重新定位');
-
-        // Step B: download full route JSON (slow, 10-30s depending on network)
-        // Must complete FULLY before populating village select
-        this._showProgress(`已定位到 ${detectedDistrict}，正在下載路線資料（約需 10–30 秒）…`);
-        const routeJSON = await this._downloadRouteJSON();
-
-        this._hideProgress();
-
-        if (!routeJSON || !routeJSON.length) {
-          this.showNotice('⚠️ 路線資料下載失敗，請確認網路後再試', 'error');
-          return;
-        }
-
-        State.cachedRouteJSON = routeJSON;
-        this._populateVillageSelect(routeJSON, detectedDistrict);
-        this._activateStep(2);
-        this.showNotice(`✅ 已找到 ${detectedDistrict} 的收運路線，請選擇您的里別`, 'info');
-      },
-      err => {
-        this._setGpsBtn(false, '📍 自動定位我的位置');
-        this._hideProgress();
-        const msgs = { 1:'您拒絕了定位權限。', 2:'無法取得 GPS 訊號。', 3:'定位逾時。' };
-        this.showNotice('⚠️ ' + (msgs[err.code] || '定位失敗。') + '請改為手動選擇行政區', 'error');
-        this._showManualDistrict();
-      },
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
-    );
-  },
-
-  // Reverse geocode coords → district name (e.g. "新店區")
-  async _getDistrictFromCoords(lat, lng) {
-    try {
-      const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&accept-language=zh-TW`;
-      let data = null;
-      for (const u of [url, `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`]) {
-        try {
-          const r = await fetch(u, { cache: 'no-store' });
-          if (r.ok) { data = await r.json(); break; }
-        } catch { /* try next */ }
-      }
-      if (!data || !data.address) return null;
-      const a = data.address;
-      // city_district contains e.g. "新店區"
-      const raw = a.city_district || a.suburb || a.town || '';
-      const m = raw.match(/[一-鿿]+[區鄉鎮市]/);
-      return m ? m[0] : null;
-    } catch { return null; }
-  },
-
-  // Fallback: guess district from GPS coords using centroid table
-  _guessDistrictFromCoords(lat, lng) {
-    const centroids = {
-      '板橋區':[25.0138,121.4629],'三重區':[25.0614,121.4883],
-      '中和區':[24.9993,121.4958],'永和區':[25.0089,121.5152],
-      '新莊區':[25.0359,121.4490],'新店區':[24.9700,121.5400],
-      '樹林區':[24.9909,121.4119],'鶯歌區':[24.9519,121.3445],
-      '三峽區':[24.9350,121.3715],'淡水區':[25.1698,121.4489],
-      '汐止區':[25.0653,121.6630],'瑞芳區':[25.1074,121.8023],
-      '土城區':[24.9761,121.4437],'蘆洲區':[25.0847,121.4726],
-      '五股區':[25.0788,121.4341],'泰山區':[25.0561,121.4278],
-      '林口區':[25.0820,121.3867],'深坑區':[25.0014,121.6147],
-      '石碇區':[24.9786,121.6542],'坪林區':[24.9344,121.7082],
-      '三芝區':[25.2528,121.5009],'石門區':[25.3005,121.5651],
-      '八里區':[25.1468,121.3963],'平溪區':[25.0224,121.7375],
-      '雙溪區':[25.0262,121.8702],'貢寮區':[25.0259,121.9139],
-      '金山區':[25.2222,121.6387],'萬里區':[25.1784,121.6887],
-      '烏來區':[24.8678,121.5494],
-    };
-    let best = null, bestDist = Infinity;
-    for (const [name, [clat, clng]] of Object.entries(centroids)) {
-      const d = haversine(lat, lng, clat, clng);
-      if (d < bestDist) { bestDist = d; best = name; }
-    }
-    return bestDist < 8000 ? best : null; // only use if within 8km of centroid
-  },
-
-  // Show location success card
-  _showLocationCard(district, detail) {
-    document.getElementById('locationDistrict').textContent = '新北市 ' + district;
-    document.getElementById('locationDetail').textContent   = detail;
-    document.getElementById('locationDisplay').classList.remove('hidden');
-  },
-
-  // Show manual district selector (GPS failed)
-  async _showManualDistrict(routeJSON) {
-    const sel = document.getElementById('districtSelect');
-    const allDistricts = [
-      '三峽區','三重區','三芝區','五股區','八里區',
-      '土城區','中和區','平溪區','汐止區','坪林區',
-      '板橋區','林口區','金山區','泰山區','深坑區',
-      '烏來區','淡水區','瑞芳區','新店區','新莊區',
-      '樹林區','永和區','石門區','石碇區','萬里區',
-      '蘆洲區','貢寮區','雙溪區','鶯歌區',
-    ]; // sorted by stroke count (筆畫)
-    sel.innerHTML = '<option value="">── 請選擇行政區 ──</option>' +
-      allDistricts.map(d => `<option value="${d}">${d}</option>`).join('');
-    document.getElementById('manualDistrict').classList.add('visible');
-
-    // If we already have routeJSON, store it for when user picks district
-    if (routeJSON) State.cachedRouteJSON = routeJSON;
-  },
-
-  // User picked a district from manual selector
-  async onDistrictChange(district) {
-    if (!district) return;
-    State.currentDistrict = district;
-    this._showLocationCard(district, '手動選擇');
-    this._showProgress('下載路線資料…');
-
-    if (!State.cachedRouteJSON) {
-      State.cachedRouteJSON = await this._downloadRouteJSON().catch(() => null);
-    }
-    this._hideProgress();
-    if (!State.cachedRouteJSON) {
-      this.showNotice('⚠️ 無法下載路線資料，請確認網路連線', 'error'); return;
-    }
-    this._populateVillageSelect(State.cachedRouteJSON, district);
-    this._activateStep(2);
-  },
-
-  /* ════════════════════════════════════════════════
-     STEP 2 — VILLAGE SELECTION
-  ════════════════════════════════════════════════ */
-
-  _populateVillageSelect(routeJSON, district) {
-    // Auto-detect field names from first row
-    // Confirmed: JSON API returns English lowercase: city, village, lineid, etc.
-    // But we guard against Chinese field names just in case
-    const sample = routeJSON[0] || {};
-    const cityField    = 'city'    in sample ? 'city'    : ('行政區' in sample ? '行政區' : 'city');
-    const villageField = 'village' in sample ? 'village' : ('里'     in sample ? '里'     : 'village');
-
-    // Debug: log first row fields to console for verification
-    console.log('[GarbageTruck] First JSON row fields:', Object.keys(sample));
-    console.log('[GarbageTruck] First row city value:', sample[cityField]);
-    console.log('[GarbageTruck] District filter:', district);
-
-    // city field value is e.g. "新店區" — match with or without 區/鄉/鎮/市 suffix
-    const districtCore = district.replace(/[區鄉鎮市]$/, ''); // "新店"
-    const filtered = routeJSON.filter(r => {
-      const cityVal = (r[cityField] || '').trim();
-      return cityVal === district          // exact: "新店區" === "新店區"
-          || cityVal.includes(districtCore); // partial: "新店區".includes("新店")
-    });
-
-    console.log('[GarbageTruck] Filtered rows for district:', filtered.length);
-
-    if (!filtered.length) {
-      this.showNotice(`⚠️ 在「${district}」找不到任何路線資料，請確認行政區是否正確`, 'error');
-      return;
-    }
-
-    const villages = [...new Set(
-      filtered
-        .map(r => (r[villageField] || '').trim())
-        .filter(Boolean)
-    )].sort((a, b) => this._strokeSort(a, b));
-
-    console.log('[GarbageTruck] Villages found:', villages.length, villages.slice(0, 10));
-
-    const sel = document.getElementById('villageSelect');
-    sel.innerHTML = '<option value="">── 請選擇里別 ──</option>' +
-      villages.map(v => `<option value="${v}">${v}</option>`).join('');
-
-    // Store detected field names for later use
-    State._cityField    = cityField;
-    State._villageField = villageField;
-
-    document.getElementById('villageSection').classList.add('visible');
-  },
-
-  // Stroke-count sort (筆畫排序) — approximated by Unicode codepoint order
-  // which roughly correlates with traditional stroke count for common characters
-  _strokeSort(a, b) {
-    // Remove trailing 里/村/鄰 for comparison
-    const clean = s => s.replace(/[里村鄰]$/, '');
-    const ca = clean(a), cb = clean(b);
-    for (let i = 0; i < Math.min(ca.length, cb.length); i++) {
-      if (ca[i] !== cb[i]) return ca.charCodeAt(i) - cb.charCodeAt(i);
-    }
-    return ca.length - cb.length;
-  },
-
-  onVillageChange(village) {
-    if (!village) return;
-    State.currentVillage = village;
-    this._renderRouteList(State.cachedRouteJSON, State.currentDistrict, village);
-    this._activateStep(3);
-  },
-
-  /* ════════════════════════════════════════════════
-     STEP 3 — ROUTE LIST
-  ════════════════════════════════════════════════ */
-
-  _renderRouteList(routeJSON, district, village) {
-    const dayKeys = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
-    const dayNames = ['日','一','二','三','四','五','六'];
-    const todayKey = todayDayKey();
-
-    // Use detected field names (stored during _populateVillageSelect)
-    const cityField    = State._cityField    || 'city';
-    const villageField = State._villageField || 'village';
-    const districtCore = district.replace(/[區鄉鎮市]$/, '');
-
-    const stops = routeJSON.filter(r => {
-      const cityVal    = (r[cityField]    || '').trim();
-      const villageVal = (r[villageField] || '').trim();
-      const cityMatch  = cityVal === district || cityVal.includes(districtCore);
-      const villMatch  = villageVal === village;
-      return cityMatch && villMatch;
-    });
-
-    console.log('[GarbageTruck] Route stops for', district, village, ':', stops.length);
-
-    if (!stops.length) {
-      document.getElementById('routeArea').innerHTML =
-        '<p style="font-size:16px;color:var(--text-secondary);padding:8px 0;">此里別找不到收運路線，請重新選擇</p>';
-      document.getElementById('routeArea').classList.add('visible');
-      return;
-    }
-
-    // Detect more field names
-    const lineidField   = 'lineid'   in (stops[0]||{}) ? 'lineid'   : '路線編號';
-    const linenameField = 'linename' in (stops[0]||{}) ? 'linename' : '路線名稱';
-    const nameField     = 'name'     in (stops[0]||{}) ? 'name'     : '清運點名稱';
-    const timeField     = 'time'     in (stops[0]||{}) ? 'time'     : '表定時間';
-
-    // Group stops by lineid, keep all fields from first stop per line
-    const byLine = {};
-    stops.forEach(r => {
-      const id = r[lineidField] || r.lineid || '';
-      if (!id) return;
-      if (!byLine[id]) {
-        byLine[id] = {
-          ...r,
-          // Normalise to English field names for rest of app
-          lineid:   id,
-          linename: r[linenameField] || r.linename || id,
-          time:     r[timeField]     || r.time     || '',
-          _stopNames: [],
-        };
-      }
-      const stopName = r[nameField] || r.name || '';
-      if (stopName) byLine[id]._stopNames.push(stopName);
-    });
-
-    // Reset selection
-    State.sel = { noon: null, night: null };
-    State.checkedRoutes = new Set();
-
-    const routes = Object.values(byLine).sort((a, b) => {
-      // Sort: day routes first, then night; within same period sort by time
-      const aH = parseInt((a.time || '0').split(':')[0]);
-      const bH = parseInt((b.time || '0').split(':')[0]);
-      return aH - bH;
-    });
-
-    const isNight = r => {
-      const h = parseInt((r.time || '0').split(':')[0]);
-      return h >= 17;
-    };
-
-    const isToday = r => {
-      const key1 = 'garbage' + todayKey;
-      const key2 = 'Garbage' + todayKey[0].toUpperCase() + todayKey.slice(1);
-      const v = r[key1] || r[key2] || '';
-      return v === 'Y' || v === '1' || v === true || v === 'true';
-    };
-
-    const collectDays = (r, prefix) => {
-      const active = dayKeys.filter(k => {
-        const v = r[prefix + k] || r[prefix + k[0].toUpperCase() + k.slice(1)] || '';
-        return v === 'Y' || v === '1' || v === true || v === 'true';
-      });
-      if (!active.length) return null;
-      if (active.length === 7) return '每天收運';
-      return '每週' + active.map(k => dayNames[dayKeys.indexOf(k)]).join('、') + ' 收運';
-    };
-
-    const html = routes.map((r, i) => {
-      const night = isNight(r);
-      const today = isToday(r);
-      const stopSample = r._stopNames.slice(0, 3).join('、') + (r._stopNames.length > 3 ? '…' : '');
-      const garbageDays = collectDays(r, 'garbage');
-
-      const nightTag = night
-        ? '<span class="tag-night">🌙 晚上班</span>' : '<span class="tag-today" style="background:#c07800;">☀️ 白天班</span>';
-      const todayTag = today
-        ? '<span class="tag-today" style="margin-left:6px;">今天收運</span>' : '';
-
-      return `<div class="route-item" id="ri_${i}" onclick="App.toggleRoute(${i}, '${r.lineid}')">
-        <div class="route-check" id="rc_${i}">✓</div>
-        <div class="route-info">
-          <div class="route-name">${r.linename || ('路線 ' + r.lineid)} ${nightTag} ${todayTag}</div>
-          <div class="route-lineid">路線代號：${r.lineid}</div>
-          <div class="route-time">⏰ 表定時間：${r.time || '未知'}</div>
-          <div class="route-days">📅 ${garbageDays}</div>
-          ${stopSample ? `<div class="route-stops">📌 清運點：${stopSample}</div>` : ''}
-        </div>
-      </div>`;
-    }).join('');
-
-    document.getElementById('routeArea').innerHTML = html;
-    document.getElementById('routeArea').classList.add('visible');
-    document.getElementById('step3desc').textContent =
-      `${village} 共有 ${routes.length} 條路線，請勾選您要追蹤的路線（可複選）`;
-    document.getElementById('selSummary').classList.add('hidden');
-    this._activateStep(4);
-  },
-
-  // Store routes for JS access
-  _routeList: [],
-
-  toggleRoute(idx, lineid) {
-    const item = document.getElementById(`ri_${idx}`);
-    const check = document.getElementById(`rc_${idx}`);
-    if (!item) return;
-
-    if (State.checkedRoutes.has(lineid)) {
-      State.checkedRoutes.delete(lineid);
-      item.classList.remove('checked');
-    } else {
-      State.checkedRoutes.add(lineid);
-      item.classList.add('checked');
-    }
-    this._updateSelSummary();
-  },
-
-  _updateSelSummary() {
-    const summary = document.getElementById('selSummary');
-    if (!State.checkedRoutes.size) {
-      summary.classList.add('hidden');
-      return;
-    }
-    const lines = [...State.checkedRoutes].map(id => {
-      const r = State.cachedRouteJSON
-        ? State.cachedRouteJSON.find(x => x.lineid === id) : null;
-      return `✅ <strong>${r ? (r.linename || id) : id}</strong>（${r ? r.time : ''}）`;
-    });
-    summary.innerHTML = '已選擇：<br>' + lines.join('<br>');
-    summary.classList.remove('hidden');
-  },
-
-  /* ════════════════════════════════════════════════
-     SAVE SETTINGS
-  ════════════════════════════════════════════════ */
-
-  saveSettings() {
-    if (!State.currentDistrict) {
-      this.showNotice('⚠️ 請先完成步驟 1：確認您的位置', 'error'); return;
-    }
-    if (!State.currentVillage) {
-      this.showNotice('⚠️ 請先完成步驟 2：選擇您所在的里', 'error'); return;
-    }
-    if (!State.checkedRoutes || !State.checkedRoutes.size) {
-      this.showNotice('⚠️ 請在步驟 3 中勾選至少一條路線', 'error'); return;
-    }
-
-    // Map checked routes to noon/night for backward compatibility with tracking screen
-    const routeJSON = State.cachedRouteJSON || [];
-    const checked = [...State.checkedRoutes];
-    const noonRoutes  = checked.filter(id => {
-      const r = routeJSON.find(x => x.lineid === id);
-      return r && parseInt((r.time || '0').split(':')[0]) < 17;
-    });
-    const nightRoutes = checked.filter(id => {
-      const r = routeJSON.find(x => x.lineid === id);
-      return r && parseInt((r.time || '0').split(':')[0]) >= 17;
-    });
-
-    // Store first of each (tracking screen handles one per shift)
-    State.sel.noon  = noonRoutes[0]  || nightRoutes[0] || checked[0];
-    State.sel.night = nightRoutes[0] || noonRoutes[0]  || checked[0];
-
-    // Also persist ALL checked routes for future use
-    State.allCheckedRoutes = checked;
-
-    // Build routeData for tracking screen
-    State.routeData.noon  = routeJSON.filter(r => r.lineid === State.sel.noon)
-      .reduce((acc, r) => { if (!acc.find(x => x.lineid === r.lineid)) acc.push({...r, _dist: 0}); return acc; }, []);
-    State.routeData.night = routeJSON.filter(r => r.lineid === State.sel.night)
-      .reduce((acc, r) => { if (!acc.find(x => x.lineid === r.lineid)) acc.push({...r, _dist: 0}); return acc; }, []);
-
-    saveToStorage();
-    this.showScreen('tracking');
-  },
-
-  /* ════════════════════════════════════════════════
-     DOWNLOAD ROUTE JSON (full dataset, paginated)
-  ════════════════════════════════════════════════ */
-
-  // Download route CSV — primary source is routes.csv in the same repo (no CORS).
-  // The file must be placed at the repo root alongside index.html.
-  // Fallback: try external proxies (may or may not work depending on network).
-  async _downloadRouteJSON() {
-    this._showProgress('載入路線資料中…');
-
-    let csvText = null;
-
-    // Build URL list: local repo file first, then external fallbacks
-    const localCSV = new URL('./routes.csv', location.href).href;
-    const extCSV   = CSV_FULL; // ntpc.gov.tw direct (blocked by CORS from JS)
-
-    const candidates = [
-      // 1. Same-origin: no CORS, fastest, most reliable
-      localCSV,
-      // 2. External CORS proxies (may fail, kept as emergency fallback)
-      `https://corsproxy.io/?${encodeURIComponent(extCSV)}`,
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(extCSV)}`,
-      `https://thingproxy.freeboard.io/fetch/${extCSV}`,
-    ];
-
-    for (const u of candidates) {
-      try {
-        console.log('[GarbageTruck] Trying:', u.slice(0, 80));
-        const r = await fetch(u, { cache: 'default' });
-        if (r.ok) {
-          const text = await r.text();
-          // Sanity check: must look like a CSV (first line should be headers)
-          if (text.length > 500 && (text.includes('lineid') || text.includes('路線編號'))) {
-            csvText = text;
-            console.log('[GarbageTruck] Success:', u.slice(0, 80), '— size:', text.length);
-            break;
-          }
-          console.warn('[GarbageTruck] Response too small or not CSV (', text.length, 'bytes):', u.slice(0,80));
-        } else {
-          console.warn('[GarbageTruck] HTTP', r.status, ':', u.slice(0, 80));
-        }
-      } catch (e) {
-        console.warn('[GarbageTruck] Error:', e.message, ':', u.slice(0, 80));
-      }
-    }
-
-    if (!csvText) {
-      this.showNotice(
-        '⚠️ 無法載入路線資料。請確認 routes.csv 已放入 GitHub repo 根目錄，再重新整理頁面。',
-        'error'
-      );
-      return [];
-    }
-
-    this._showProgress('解析資料中…');
-    const rows = this._parseCSV(csvText);
-    console.log('[GarbageTruck] Parsed', rows.length, 'rows. Fields:', Object.keys(rows[0] || {}));
-    return rows;
-  },
-
-  // Parse CSV text → array of objects
-  // Handles BOM, quoted fields, and CRLF/LF line endings
-  _parseCSV(text) {
-    // Strip BOM if present
-    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
-    const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-    if (lines.length < 2) return [];
-
-    const headers = this._csvSplitLine(lines[0]);
-    const rows = [];
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) continue;
-      const vals = this._csvSplitLine(line);
-      if (vals.length < 2) continue;
-      const obj = {};
-      headers.forEach((h, idx) => {
-        obj[h.trim()] = (vals[idx] || '').trim();
-      });
-      rows.push(obj);
-    }
-    return rows;
-  },
-
-  _csvSplitLine(line) {
-    const result = [];
-    let cur = '', inQ = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (ch === '"') { inQ = !inQ; }
-      else if (ch === ',' && !inQ) { result.push(cur); cur = ''; }
-      else { cur += ch; }
-    }
-    result.push(cur);
-    return result;
-  },
-
-  /* ════════════════════════════════════════════════
-     UI HELPERS
-  ════════════════════════════════════════════════ */
-
-  _setGpsBtn(loading, label) {
-    document.getElementById('gpsBtn').disabled = loading;
-    document.getElementById('gpsSpinner').classList.toggle('visible', loading);
-    document.getElementById('gpsBtnText').textContent = label;
-  },
-
-  _showProgress(msg) {
-    const el = document.getElementById('step1Progress');
-    document.getElementById('step1ProgressMsg').textContent = msg;
-    el.classList.add('visible');
-  },
-
-  _hideProgress() {
-    document.getElementById('step1Progress').classList.remove('visible');
-  },
-
-  _activateStep(n) {
-    for (let i = 1; i <= 4; i++) {
-      const el = document.getElementById('snum' + i);
-      if (el) el.classList.toggle('active', i <= n);
-    }
-  },
-
-  _isNoon(timeStr) {
-    if (!timeStr) return false;
-    const h = parseInt(timeStr.split(':')[0]);
-    return h >= 10 && h < 16;
-  },
-
-  _isNight(timeStr) {
-    if (!timeStr) return false;
-    const h = parseInt(timeStr.split(':')[0]);
-    return h >= 16 || h < 6;
-  },
-
-  _renderRoutes(shift, routes) {
-    const container = document.getElementById(shift + 'Routes');
-    if (!routes.length) {
-      container.innerHTML = '<p style="font-size:14px;color:var(--text-secondary);margin-bottom:8px;">附近找不到路線，請選擇「不追蹤」</p>';
-      return;
-    }
-
-    // Build collection-days string from route flags
-    function collectDays(r, type) {
-      const dayNames = ['日','一','二','三','四','五','六'];
-      const keys = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
-      const active = keys.filter(k => {
-        const v = r[type + k];
-        return v === 'Y' || v === '1' || v === true;
-      });
-      if (!active.length) return '';
-      if (active.length === 7) return '每天';
-      return '週' + active.map(k => dayNames[keys.indexOf(k)]).join('、');
-    }
-
-    const dayKey = todayDayKey();
-
-    container.innerHTML = routes.map((r, i) => {
-      const distLabel = r._dist >= 1000
-        ? (r._dist / 1000).toFixed(1) + ' 公里'
-        : r._dist + ' 公尺';
-
-      const garbageDays   = collectDays(r, 'garbage');
-      const recyclingDays = collectDays(r, 'recycling');
-
-      const isToday = (() => {
-        const v = r['garbage' + dayKey];
-        return v === 'Y' || v === '1' || v === true;
-      })();
-
-      const todayTag  = isToday
-        ? '<span class="tag-today">今天收運</span>' : '';
-      const closestStop = r.name
-        ? `<div class="route-nearest">📍 最近站點：${r.name}</div>` : '';
-
-      return `
-        <div class="route-item" id="ri_${shift}_${i}"
-             onclick="App.selectRoute('${shift}', ${i}, '${r.lineid}')">
-          <div class="route-radio"><div class="dot"></div></div>
-          <div class="route-info">
-            <div class="route-name">${r.linename || ('路線 ' + r.lineid)} ${todayTag}</div>
-            <div class="route-meta">${r.city || ''}${r.village ? ' ' + r.village : ''}</div>
-            ${closestStop}
-            <div class="route-sched ${shift}">
-              表定時間：${r.time || '未知'}
-              ${garbageDays ? '&nbsp;·&nbsp;收垃圾：' + garbageDays : ''}
-              ${recyclingDays ? '&nbsp;·&nbsp;回收：' + recyclingDays : ''}
-            </div>
-          </div>
-          <div class="route-dist">${distLabel}</div>
-        </div>`;
-    }).join('');
-  },
-
-
-
-  updateDist(val) {
-    const v = parseInt(val);
-    State.distAlert = v;
-    const label = v >= 1000 ? '1 公里' : v + ' 公尺';
-    document.getElementById('distDisplay').textContent = label;
-    document.getElementById('distHint').innerHTML =
-      `垃圾車進入 <strong>${label}</strong>範圍時，開始每 2 分鐘語音播報一次`;
-  },
-
-  // ── Settings: voice type ──
-  onVoiceTypeChange(type) {
-    State.voiceType = type;
-    const row = document.getElementById('customVoiceRow');
-    if (type === 'custom') {
-      row.classList.add('visible');
-    } else {
-      row.classList.remove('visible');
-      document.getElementById('customVoiceCode').value = '';
-      document.getElementById('customVoiceStatus').classList.add('hidden');
-      State.customVoiceEnabled = false;
-    }
-  },
-
-  onCustomCodeInput(val) {
-    if (val === '1212') {
-      State.customVoiceEnabled = true;
-      document.getElementById('customVoiceStatus').classList.remove('hidden');
-    } else {
-      State.customVoiceEnabled = false;
-      document.getElementById('customVoiceStatus').classList.add('hidden');
-    }
-  },
-
-  saveSettings() {
-    if (!State.currentDistrict) {
-      this.showNotice('⚠️ 請先完成步驟 1：確認您的位置', 'error'); return;
-    }
-    if (!State.currentVillage) {
-      this.showNotice('⚠️ 請先完成步驟 2：選擇您所在的里', 'error'); return;
-    }
-    if (!State.checkedRoutes || !State.checkedRoutes.size) {
-      this.showNotice('⚠️ 請在步驟 3 中勾選至少一條路線', 'error'); return;
-    }
-
-    State.allCheckedRoutes = [...State.checkedRoutes];
-    const rj = State.cachedRouteJSON || [];
-
-    // Extract and persist route metadata (lineid + linename + time)
-    // This is critical: tracking screen needs these even after page reload
-    // when cachedRouteJSON is no longer in memory.
-    State.savedRouteInfo = State.allCheckedRoutes.map(id => {
-      const r = rj.find(x => x.lineid === id);
-      return r
-        ? { lineid: r.lineid, linename: r.linename || id, time: r.time || '' }
-        : { lineid: id, linename: id, time: '' };
-    });
-
-    // Map to day/night slots
-    const dayR   = State.savedRouteInfo.filter(r => parseInt((r.time||'0').split(':')[0]) < 17);
-    const nightR = State.savedRouteInfo.filter(r => parseInt((r.time||'0').split(':')[0]) >= 17);
-    State.sel.noon  = (dayR[0]   || nightR[0] || State.savedRouteInfo[0])?.lineid;
-    State.sel.night = (nightR[0] || dayR[0]   || State.savedRouteInfo[0])?.lineid;
-
-    saveToStorage();
-    State.arrivedShown = false;
-    this.showScreen('tracking');
-  },
-
-  /* ════════════════════════════════════════════════
-     TRACKING SCREEN
-  ════════════════════════════════════════════════ */
-
-  initTrackingScreen() {
-    this._autoSelectRouteByTime();
-    this._updateActivePill();
-    this._showRouteInfoOnHero();   // populate hero card immediately
-    this._initMap();
-    this._acquireWakeLock();
-    this.requestLocation();
-  },
-
-  // Show route info on hero card immediately (before tracking starts)
-  _showRouteInfoOnHero() {
-    const lineid = State.activeLineid;
-    if (!lineid) return;
-    const row = (State.savedRouteInfo || []).find(r => r.lineid === lineid)
-             || (State.cachedRouteJSON || []).find(r => r.lineid === lineid);
-
-    const nameEl  = document.getElementById('heroRouteName');
-    const etaEl   = document.getElementById('heroEtaVal');
-    const schedEl = document.getElementById('heroSchedTime');
-
-    if (nameEl)  nameEl.textContent  = row ? (row.linename || lineid) : lineid;
-    if (etaEl)   etaEl.textContent   = '—';
-    if (schedEl) schedEl.textContent = row ? (row.time || '—') : '—';
-
-    // Show all checked routes as summary in countdown area
-    const summary = (State.savedRouteInfo || [])
-      .filter(r => State.allCheckedRoutes.includes(r.lineid))
-      .map(r => `${r.linename || r.lineid}（${r.time}）`)
-      .join('　');
-    const countdown = document.getElementById('countdownRow');
-    if (countdown && summary) countdown.textContent = '已設定路線：' + summary;
-  },
-
-  /* ── Update hero card route info ── */
-  _updateActivePill() {
-    const lineid = State.activeLineid;
-    if (!lineid) return;
-
-    // Find route info from savedRouteInfo first, then cachedRouteJSON
-    let row = (State.savedRouteInfo || []).find(r => r.lineid === lineid);
-    if (!row && State.cachedRouteJSON) {
-      row = State.cachedRouteJSON.find(r => r.lineid === lineid);
-    }
-    // If still nothing, use lineid itself
-    const name = row ? (row.linename || lineid) : lineid;
-    const time = row ? (row.time || '') : '';
-
-    // Update hero card route name
-    const routeEl = document.getElementById('heroRouteName');
-    if (routeEl) routeEl.textContent = name;
-
-    // Update hero card ETA label with scheduled time
-    const schedEl = document.getElementById('heroEtaVal');
-    if (schedEl && !State.tracking) {
-      schedEl.textContent = time ? ('表定 ' + time) : '—';
-    }
-
-    console.log('[GarbageTruck] Pill updated:', name, time);
-  },
-
-  /* ── Map init ── */
-  _initMap() {
-    if (State.map) {
-      // Map already exists — call invalidateSize after a short delay
-      // to let the flex layout re-render
-      setTimeout(() => {
-        try { State.map.invalidateSize({ animate: false }); } catch(e) {}
-        if (State.userLat) {
-          try {
-            State.map.setView([State.userLat, State.userLng], 15, { animate: false });
-          } catch(e) {}
-        }
-      }, 300);
-      return;
-    }
-
-    // Create the map after the screen is visible.
-    // We wait 400ms — enough for iOS Safari to finish flex layout.
-    // We do NOT rely on offsetHeight (unreliable on iOS before first paint).
-    const doCreate = () => {
-      try {
-        const lat = State.userLat || 25.014;
-        const lng = State.userLng || 121.468;
-
-        State.map = L.map('map', {
-          zoomControl:      false,
-          attributionControl: false,
-          dragging:         true,
-          tap:              true,
-        }).setView([lat, lng], 15);
-
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          maxZoom:     19,
-          attribution: '',
-        }).addTo(State.map);
-
-        L.control.zoom({ position: 'bottomleft' }).addTo(State.map);
-
-        // Force a size recalculation after tiles start loading
-        setTimeout(() => {
-          try { State.map.invalidateSize({ animate: false }); } catch(e) {}
-          if (State.userLat) this._updateUserMarker();
-        }, 300);
-
-        console.log('[GarbageTruck] Map created');
-      } catch(e) {
-        console.error('[GarbageTruck] Map init error:', e);
-      }
-    };
-
-    // 400ms delay = safe for iOS Safari flex layout completion
-    setTimeout(doCreate, 400);
-  },
-
-  // GPS button on map: fly to user position
-  relocateMap() {
-    if (!State.map) return;
-    if (State.userLat) {
-      State.map.flyTo([State.userLat, State.userLng], 15, { duration: 0.8 });
-    } else {
-      this.requestLocation();
-    }
-  },
-
-  _makeUserIcon() {
-    return L.divIcon({
-      className: '',
-      html: `<div style="width:18px;height:18px;border-radius:50%;
-               background:#1a52a8;border:3px solid #fff;
-               box-shadow:0 1px 6px rgba(0,0,0,0.4)"></div>`,
-      iconSize: [18,18], iconAnchor: [9,9],
-    });
-  },
-
-  _updateUserMarker() {
-    if (!State.map || !State.userLat) return;
-    if (State.markers.user) {
-      State.markers.user.setLatLng([State.userLat, State.userLng]);
-    } else {
-      State.markers.user = L.marker([State.userLat, State.userLng], { icon: this._makeUserIcon() })
-        .addTo(State.map).bindPopup('您的位置');
-    }
-  },
-
-  _updateTruckMarker(lat, lng, name) {
-    const icon = L.divIcon({
-      className: '',
-      html: `<div style="font-size:28px;line-height:1;
-               filter:drop-shadow(0 2px 3px rgba(0,0,0,0.4))">🚛</div>`,
-      iconSize: [32,28], iconAnchor: [16,24],
-    });
-    if (State.markers.truck) {
-      State.markers.truck.setLatLng([lat, lng]);
-    } else {
-      State.markers.truck = L.marker([lat, lng], { icon })
-        .addTo(State.map).bindPopup(name || '垃圾車');
-    }
-    // Fit both markers in view
-    const pts = [[lat, lng]];
-    if (State.userLat) pts.push([State.userLat, State.userLng]);
-    State.map.fitBounds(pts, { padding: [48, 48], maxZoom: 17 });
-  },
-
-  /* ── GPS / location ── */
-  requestLocation() {
-    if (!navigator.geolocation) return;
-    const opts = { enableHighAccuracy: true, maximumAge: 10000 };
-
-    const onSuccess = pos => {
-      State.userLat = pos.coords.latitude;
-      State.userLng = pos.coords.longitude;
-      this._updateUserMarker();
-    };
-    const onError = err => console.warn('Geolocation', err.code, err.message);
-
-    navigator.geolocation.getCurrentPosition(onSuccess, onError, opts);
-    if (!State.geoWatchId) {
-      State.geoWatchId = navigator.geolocation.watchPosition(onSuccess, onError, opts);
-    }
-  },
-
-  _showPermOverlay() {
-    document.getElementById('perm-overlay').classList.add('visible');
-  },
-
-  /* ── Wake Lock (Screen Always On) ── */
-  async _acquireWakeLock() {
-    // Screen Wake Lock API — keeps screen on while monitoring
-    if ('wakeLock' in navigator) {
-      try {
-        State.wakeLock = await navigator.wakeLock.request('screen');
-        State.wakeLock.addEventListener('release', () => {
-          // Reacquire when page becomes visible again
-          document.addEventListener('visibilitychange', () => {
-            if (!document.hidden && State.tracking) this._acquireWakeLock();
-          }, { once: true });
-        });
-        document.getElementById('wakeBanner').classList.remove('visible');
-        console.log('[GarbageTruck] Wake Lock acquired');
-      } catch (e) {
-        console.warn('[GarbageTruck] Wake Lock failed:', e.message);
-        document.getElementById('wakeBanner').classList.add('visible');
-      }
-    } else {
-      // Not supported — show banner warning user to keep screen on
-      document.getElementById('wakeBanner').classList.add('visible');
-    }
-  },
-
-  _releaseWakeLock() {
-    if (State.wakeLock) {
-      State.wakeLock.release();
-      State.wakeLock = null;
-    }
-  },
-
-  /* ── Tracking control ── */
-  toggleTracking() {
-    State.tracking ? this._stopTracking() : this._startTracking();
-  },
-
-  _startTracking() {
-    if (!State.userLat) {
-      this.requestLocation();
-      this._setAlert('info','📍','取得您的位置中…','請稍候，正在取得 GPS 定位');
-      // Retry after a moment
-      setTimeout(() => {
-        if (State.userLat) this._startTracking();
-        else this._setAlert('warning','⚠️','無法取得位置',
-          '請確認已允許瀏覽器定位權限，然後再按一次開始監控');
-      }, 4000);
-      return;
-    }
-
-    this._autoSelectRouteByTime();
-    this._updateActivePill();
-
-    State.tracking = true;
-    this._acquireWakeLock();
-
-    const btn = document.getElementById('trackBtn');
-    btn.className = 'track-btn stop';
-    btn.textContent = '⏹ 停止監控';
-    document.getElementById('trackSub').textContent = '監控中';
-    document.getElementById('heroUpdDot').style.background = '#7ef0a8';
-
-    this._fetchAndUpdate();
-    this._startCountdown();
-  },
-
-  _stopTracking() {
-    State.tracking = false;
-    clearTimeout(State.updateTimer);
-    clearInterval(State.countdownTimer);
-    this._releaseWakeLock();
-
-    const btn = document.getElementById('trackBtn');
-    btn.className = 'track-btn start';
-    btn.textContent = '▶ 開始監控垃圾車位置';
-    document.getElementById('trackSub').textContent = '已停止';
-    document.getElementById('heroUpdDot').style.background = '#bbb';
-    document.getElementById('heroUpdTime').textContent = '—';
-    document.getElementById('countdownRow').textContent = '';
-    this._setAlert('info','⏸','監控已停止','按「開始監控」重新啟動');
-  },
-
-  /* ── Auto-select route by time ── */
-  // Uses savedRouteInfo (always available from localStorage) as primary source,
-  // falls back to cachedRouteJSON if available.
-  _autoSelectRouteByTime() {
-    const routes = State.allCheckedRoutes || [];
-    if (!routes.length) return;
-
-    // Build a lookup: lineid → {linename, time}
-    // Priority: savedRouteInfo (persisted) > cachedRouteJSON (session only)
-    const info = {};
-    (State.savedRouteInfo || []).forEach(r => { info[r.lineid] = r; });
-    if (State.cachedRouteJSON) {
-      State.cachedRouteJSON.forEach(r => {
-        if (!info[r.lineid]) info[r.lineid] = r;
-      });
-    }
-
-    const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
-    let best = null, bestScore = Infinity;
-
-    routes.forEach(id => {
-      const row = info[id];
-      if (!row || !row.time) return;
-      const parts = row.time.split(':').map(Number);
-      const hh = parts[0], mm = parts[1] || 0;
-      if (isNaN(hh)) return;
-      const rMin = hh * 60 + mm;
-      const diff = rMin - nowMin;
-      const score = diff >= 0 ? diff : diff + 1440;
-      if (score < bestScore) { bestScore = score; best = id; }
-    });
-    State.activeLineid = best || routes[0];
-
-    const dayR   = routes.filter(id => {
-      const r = info[id];
-      if (!r || !r.time) return false;
-      return parseInt(r.time.split(':')[0]) < 17;
-    });
-    const nightR = routes.filter(id => {
-      const r = info[id];
-      if (!r || !r.time) return false;
-      return parseInt(r.time.split(':')[0]) >= 17;
-    });
-
-    State.sel.noon  = dayR[0]   || nightR[0] || routes[0];
-    State.sel.night = nightR[0] || dayR[0]   || routes[0];
-    State.activeTab = new Date().getHours() >= 17 ? 'night' : 'noon';
-
-    console.log('[GarbageTruck] Active route:', State.activeLineid,
-      '| info:', info[State.activeLineid]);
-  },
-
-  /* ── GPS fetch loop ── */
-  async _fetchAndUpdate() {
-    if (!State.tracking) return;
-    document.getElementById('heroUpdTime').textContent = '更新中…';
-    try {
-      const data = await fetchJSON(API_GPS);
-      State.gpsData = Array.isArray(data) ? data : (data.result || []);
-      this._processGPS();
-    } catch (e) {
-      console.warn('[GarbageTruck] GPS fetch error', e);
-      document.getElementById('heroUpdTime').textContent = '更新失敗';
-    }
-    State.updateTimer = setTimeout(() => this._fetchAndUpdate(), UPDATE_MS);
-  },
-
-  _processGPS() {
-    if (!State.userLat) return;
-    const lineid = State.activeLineid || State.sel[State.activeTab];
-    if (!lineid) return;
-
-    const truck = State.gpsData.find(g => g.lineid === lineid);
-    const now = new Date();
-    const timeStr = now.getHours() + ':' +
-      String(now.getMinutes()).padStart(2, '0') + ':' +
-      String(now.getSeconds()).padStart(2, '0');
-    document.getElementById('heroUpdTime').textContent = timeStr + ' 更新';
-
-    if (!truck) {
-      this._setHeroNoTruck();
-      return;
-    }
-
-    const tLat = parseFloat(truck.latitude);
-    const tLng = parseFloat(truck.longitude);
-    const dist  = haversine(State.userLat, State.userLng, tLat, tLng);
-
-    // Update hero card
-    document.getElementById('heroDistNum').textContent =
-      dist >= 1000 ? (dist / 1000).toFixed(1) : dist;
-    document.getElementById('heroDistUnit').textContent =
-      dist >= 1000 ? '公里' : '公尺';
-    document.getElementById('heroEtaVal').textContent = etaText(dist);
-
-    // Update map
-    const truckRow = (State.cachedRouteJSON || []).find(r => r.lineid === lineid);
-    this._updateTruckMarker(tLat, tLng, truckRow ? truckRow.linename : lineid);
-
-    // Update route name from savedRouteInfo (always available) or cachedRouteJSON
-    const row = (State.savedRouteInfo || []).find(r => r.lineid === lineid)
-             || (State.cachedRouteJSON || []).find(r => r.lineid === lineid);
-    const el = document.getElementById('heroRouteName');
-    if (el) el.textContent = row ? (row.linename || lineid) : lineid;
-
-    // Status bar + voice
-    const bar = document.getElementById('statusBar');
-    if (dist <= 200) {
-      bar.className = 'status-bar danger';
-      this._playAudio('垃圾車即將到達請準備');
-      if (dist <= 80) this._showArrived();
-    } else if (dist <= State.distAlert) {
-      bar.className = 'status-bar warning';
-      this._playAudio(this._distanceAudioKey(dist));
-    } else {
-      bar.className = 'status-bar';
-    }
-  },
-
-  _setHeroNoTruck() {
-    document.getElementById('heroDistNum').textContent = '—';
-    document.getElementById('heroDistUnit').textContent = '公尺';
-    document.getElementById('heroEtaVal').textContent = '車輛尚未出勤';
-    this._setAlert('info', '🕐', '車輛尚未出勤',
-      '目前此路線車輛尚未出勤，系統將繼續每 2 分鐘自動確認。');
-  },
-
-  _setAlert(cls, icon, title, sub) {
-    document.getElementById('alertCard').className = 'alert-card ' + cls;
-    document.getElementById('alertIcon').textContent  = icon;
-    document.getElementById('alertTitle').textContent = title;
-    document.getElementById('alertSub').textContent   = sub;
-  },
-
-  /* ── Countdown display ── */
-  _startCountdown() {
-    clearInterval(State.countdownTimer);
-    State.countdown = UPDATE_MS / 1000;
-    const row = document.getElementById('countdownRow');
-    State.countdownTimer = setInterval(() => {
-      if (!State.tracking) { clearInterval(State.countdownTimer); row.textContent = ''; return; }
-      State.countdown--;
-      if (State.countdown > 0) {
-        const m = Math.floor(State.countdown / 60);
-        const s = State.countdown % 60;
-        row.textContent = m > 0
-          ? `下次更新：${m} 分 ${s} 秒後`
-          : `下次更新：${s} 秒後`;
-      } else {
-        State.countdown = UPDATE_MS / 1000;
-        row.textContent = '';
-      }
-    }, 1000);
-  },
-
-  /* ════════════════════════════════════════════════
-     VOICE ENGINE
-  ════════════════════════════════════════════════ */
-
-  // Toggle voice on/off, play confirmation audio
-  toggleVoice() {
-    State.voiceOn = !State.voiceOn;
-    document.getElementById('voiceToggle').className =
-      'toggle-wrap' + (State.voiceOn ? '' : ' off');
-
-    // Sync voiceType from settings DOM (user may have changed it)
-    this._syncVoiceTypeFromDOM();
-
-    if (State.voiceOn) {
-      // Must force-play even though voiceOn was just turned on
-      this._playAudioForce('您已開啟語音提醒請自行調整音量');
-    } else {
-      this._playAudioForce('您已關閉語音提醒');
-    }
-  },
-
-  // Read current voiceType radio selection from DOM
-  _syncVoiceTypeFromDOM() {
-    const checked = document.querySelector('input[name="voiceType"]:checked');
-    if (checked) {
-      State.voiceType = checked.value;
-    }
-    // Also sync custom code status
-    const code = document.getElementById('customVoiceCode');
-    if (code) {
-      State.customVoiceEnabled = (code.value === '1212');
-    }
-  },
-
-  // Main audio dispatcher: MP3 if custom+enabled, else TTS
-  _playAudio(textKey) {
-    if (!State.voiceOn) return;
-    this._playAudioForce(textKey);
-  },
-
-  _playAudioForce(textKey) {
-    if (State.voiceType === 'custom' && State.customVoiceEnabled) {
-      this._playMP3(textKey);
-    } else {
-      this._speakTTS(textKey);
-    }
-  },
-
-  // Play pre-recorded MP3 with Web Audio API gain boost
-  // Uses AudioContext to amplify volume before playback begins,
-  // preventing the "quiet start" issue of HTML5 Audio volume changes.
-  async _playMP3(filename) {
-    // Stop any currently playing audio
-    if (State.currentAudio) {
-      try { State.currentAudio.stop(); } catch(e) {}
-      State.currentAudio = null;
-    }
-
-    const url = `audio/${filename}.mp3`;
-    try {
-      // Get or create AudioContext (must be created/resumed after user gesture)
-      if (!State.audioCtx) {
-        State.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      }
-      if (State.audioCtx.state === 'suspended') {
-        await State.audioCtx.resume();
-      }
-
-      // Fetch and decode the MP3
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const arrayBuffer = await resp.arrayBuffer();
-      const audioBuffer  = await State.audioCtx.decodeAudioData(arrayBuffer);
-
-      // Build gain chain: source → gainNode → destination
-      const source   = State.audioCtx.createBufferSource();
-      const gainNode = State.audioCtx.createGain();
-
-      source.buffer = audioBuffer;
-      // Boost gain to 2.5× (max useful before clipping on most phones)
-      gainNode.gain.setValueAtTime(2.5, State.audioCtx.currentTime);
-
-      source.connect(gainNode);
-      gainNode.connect(State.audioCtx.destination);
-      source.start(0);
-
-      State.currentAudio = source;
-      console.log('[GarbageTruck] Playing MP3 (boosted):', filename);
-
-      source.onended = () => { State.currentAudio = null; };
-    } catch(e) {
-      console.warn('[GarbageTruck] MP3 failed, falling back to TTS:', filename, e.message);
-      this._speakTTS(filename);
-    }
-  },
-
-  // Pre-unlock AudioContext on first user interaction (call once)
-  _unlockAudio() {
-    if (State.audioCtx) return;
-    try {
-      State.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      // Create and immediately stop a silent buffer to unlock
-      const buf = State.audioCtx.createBuffer(1, 1, 22050);
-      const src = State.audioCtx.createBufferSource();
-      src.buffer = buf;
-      src.connect(State.audioCtx.destination);
-      src.start(0);
-    } catch(e) {}
-  },
-
-  // TTS: choose voice by State.voiceType
-  _speakTTS(text) {
-    if (!window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'zh-TW'; u.rate = 0.88; u.volume = 1;
-
-    // Pick voice
-    const voices = window.speechSynthesis.getVoices().filter(v =>
-      v.lang.startsWith('zh') || v.lang.startsWith('cmn')
-    );
-    if (voices.length > 0) {
-      if (State.voiceType === 'male') {
-        // Try to find a male voice; heuristic: voices after index 0 tend to be male
-        u.voice = voices.find(v => /male|man|男/i.test(v.name)) || voices[1] || voices[0];
-      } else {
-        // Female: first zh voice (usually female on most systems)
-        u.voice = voices.find(v => /female|woman|女/i.test(v.name)) || voices[0];
-      }
-    }
-    window.speechSynthesis.speak(u);
-  },
-
-  // Convert distance to closest segment audio filename
-  _distanceAudioKey(dist) {
-    if (dist <= 100) return '垃圾車距離您200公尺';      // same as 200m bucket
-    const seg = Math.ceil(dist / 100) * 100;
-    const capped = Math.min(seg, 1000);
-    return `垃圾車距離您${capped}公尺`;
-  },
-
-
-
-  /* ── Arrived overlay ── */
-  _showArrived() {
-    if (State.arrivedShown) return;
-    State.arrivedShown = true;
-    document.getElementById('arrived-overlay').classList.add('visible');
-    this._playAudioForce('垃圾車到了請準備');
-  },
-
-  dismissArrived() {
-    document.getElementById('arrived-overlay').classList.remove('visible');
-    this._stopTracking();
-  },
-
-  /* ── Visibility change: reacquire WakeLock, resume tracking ── */
-  _handleVisibility() {
-    if (!document.hidden && State.tracking) {
-      // Page came back to foreground — resume immediately
-      this._acquireWakeLock();
-      clearTimeout(State.updateTimer);
-      clearInterval(State.countdownTimer);
-      this._fetchAndUpdate();
-      this._startCountdown();
-    }
-  },
+/* ── Init ── */
+init() {
+const hasSettings = loadFromStorage();
+const hasRoutes   = State.allCheckedRoutes && State.allCheckedRoutes.length > 0;
+if (hasSettings && hasRoutes) {
+this.showScreen('tracking');
+} else {
+this.showScreen('settings');
+}
+this.updateDist(State.distAlert);
+},
+/* ── Screen switching ── */
+showScreen(name) {
+try {
+document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+const el = document.getElementById('screen-' + name);
+if (!el) { console.error('[GarbageTruck] Screen not found:', name); return; }
+el.classList.add('active');
+if (name === 'settings') {
+try { this.populateSettingsFromState(); } catch(e) { console.warn(e); }
+if (State.currentDistrict) {
+try { this._showLocationCard(State.currentDistrict, '已儲存的位置'); } catch(e) {}
+try { this._activateStep(State.currentVillage ? 3 : 2); } catch(e) {}
+}
+if (State.tracking) {
+try { this._stopTracking(); } catch(e) {}
+}
+}
+if (name === 'tracking') {
+try { this.initTrackingScreen(); } catch(e) { console.warn(e); }
+}
+} catch(e) {
+console.error('[GarbageTruck] showScreen error:', e);
+}
+},
+/* ── SETTINGS SCREEN ── */
+populateSettingsFromState() {
+document.getElementById('distSlider').value = State.distAlert;
+this.updateDist(State.distAlert);
+const radios = document.querySelectorAll('input[name="voiceType"]');
+radios.forEach(r => { r.checked = (r.value === State.voiceType); });
+if (State.voiceType === 'custom') {
+document.getElementById('customVoiceRow').classList.add('visible');
+if (State.customVoiceEnabled) {
+document.getElementById('customVoiceCode').value = '1212';
+document.getElementById('customVoiceStatus').classList.remove('hidden');
+}
+}
+},
+showNotice(msg, type = 'error') {
+const el = document.getElementById('notice');
+el.textContent = msg;
+el.className = `notice ${type} visible`;
+setTimeout(() => el.classList.remove('visible'), 6000);
+},
+/* ════════════════════════════════════════════════
+STEP 1 — GPS LOCATION
+════════════════════════════════════════════════ */
+async locateByGPS() {
+if (!navigator.geolocation) {
+this.showNotice('⚠️ 您的瀏覽器不支援自動定位，請手動選擇行政區', 'error');
+this._showManualDistrict();
+return;
+}
+this._setGpsBtn(true, '定位中，請稍候…');
+this._showProgress('正在取得您的位置…');
+navigator.geolocation.getCurrentPosition(
+async pos => {
+State.userLat = pos.coords.latitude;
+State.userLng = pos.coords.longitude;
+this._showProgress('判斷行政區中…');
+const district = await this._getDistrictFromCoords(pos.coords.latitude, pos.coords.longitude);
+const detectedDistrict = district
+|| this._guessDistrictFromCoords(pos.coords.latitude, pos.coords.longitude);
+if (!detectedDistrict) {
+this._setGpsBtn(false, '📍 重新定位');
+this._hideProgress();
+this.showNotice('⚠️ 無法判斷行政區，請手動選擇', 'error');
+this._showManualDistrict();
+return;
+}
+State.currentDistrict = detectedDistrict;
+this._showLocationCard(detectedDistrict, '新北市 · GPS 自動定位');
+this._setGpsBtn(false, '📍 重新定位');
+this._showProgress(`已定位到 ${detectedDistrict}，正在下載路線資料（約需 10–30 秒）…`);
+const routeJSON = await this._downloadRouteJSON();
+this._hideProgress();
+if (!routeJSON || !routeJSON.length) {
+this.showNotice('⚠️ 路線資料下載失敗，請確認網路後再試', 'error');
+return;
+}
+State.cachedRouteJSON = routeJSON;
+this._populateVillageSelect(routeJSON, detectedDistrict);
+this._activateStep(2);
+this.showNotice(`✅ 已找到 ${detectedDistrict} 的收運路線，請選擇您的里別`, 'info');
+},
+err => {
+this._setGpsBtn(false, '📍 自動定位我的位置');
+this._hideProgress();
+const msgs = { 1:'您拒絕了定位權限。', 2:'無法取得 GPS 訊號。', 3:'定位逾時。' };
+this.showNotice('⚠️ ' + (msgs[err.code] || '定位失敗。') + '請改為手動選擇行政區', 'error');
+this._showManualDistrict();
+},
+{ enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
+);
+},
+async _getDistrictFromCoords(lat, lng) {
+try {
+const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&addressdetails=1&accept-language=zh-TW`;
+let data = null;
+for (const u of [url, `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`]) {
+try {
+const r = await fetch(u, { cache: 'no-store' });
+if (r.ok) { data = await r.json(); break; }
+} catch { /* try next */ }
+}
+if (!data || !data.address) return null;
+const a = data.address;
+const raw = a.city_district || a.suburb || a.town || '';
+const m = raw.match(/[一-鿿]+[區鄉鎮市]/);
+return m ? m[0] : null;
+} catch { return null; }
+},
+_guessDistrictFromCoords(lat, lng) {
+const centroids = {
+'板橋區':[25.0138,121.4629],'三重區':[25.0614,121.4883],
+'中和區':[24.9993,121.4958],'永和區':[25.0089,121.5152],
+'新莊區':[25.0359,121.4490],'新店區':[24.9700,121.5400],
+'樹林區':[24.9909,121.4119],'鶯歌區':[24.9519,121.3445],
+'三峽區':[24.9350,121.3715],'淡水區':[25.1698,121.4489],
+'汐止區':[25.0653,121.6630],'瑞芳區':[25.1074,121.8023],
+'土城區':[24.9761,121.4437],'蘆洲區':[25.0847,121.4726],
+'五股區':[25.0788,121.4341],'泰山區':[25.0561,121.4278],
+'林口區':[25.0820,121.3867],'深坑區':[25.0014,121.6147],
+'石碇區':[24.9786,121.6542],'坪林區':[24.9344,121.7082],
+'三芝區':[25.2528,121.5009],'石門區':[25.3005,121.5651],
+'八里區':[25.1468,121.3963],'平溪區':[25.0224,121.7375],
+'雙溪區':[25.0262,121.8702],'貢寮區':[25.0259,121.9139],
+'金山區':[25.2222,121.6387],'萬里區':[25.1784,121.6887],
+'烏來區':[24.8678,121.5494],
 };
-
+let best = null, bestDist = Infinity;
+for (const [name, [clat, clng]] of Object.entries(centroids)) {
+const d = haversine(lat, lng, clat, clng);
+if (d < bestDist) { bestDist = d; best = name; }
+}
+return bestDist < 8000 ? best : null;
+},
+_showLocationCard(district, detail) {
+document.getElementById('locationDistrict').textContent = '新北市 ' + district;
+document.getElementById('locationDetail').textContent   = detail;
+document.getElementById('locationDisplay').classList.remove('hidden');
+},
+async _showManualDistrict(routeJSON) {
+const sel = document.getElementById('districtSelect');
+const allDistricts = [
+'三峽區','三重區','三芝區','五股區','八里區',
+'土城區','中和區','平溪區','汐止區','坪林區',
+'板橋區','林口區','金山區','泰山區','深坑區',
+'烏來區','淡水區','瑞芳區','新店區','新莊區',
+'樹林區','永和區','石門區','石碇區','萬里區',
+'蘆洲區','貢寮區','雙溪區','鶯歌區',
+];
+sel.innerHTML = '<option value="">── 請選擇行政區 ──</option>' +
+allDistricts.map(d => `<option value="${d}">${d}</option>`).join('');
+document.getElementById('manualDistrict').classList.add('visible');
+if (routeJSON) State.cachedRouteJSON = routeJSON;
+},
+async onDistrictChange(district) {
+if (!district) return;
+State.currentDistrict = district;
+this._showLocationCard(district, '手動選擇');
+this._showProgress('下載路線資料…');
+if (!State.cachedRouteJSON) {
+State.cachedRouteJSON = await this._downloadRouteJSON().catch(() => null);
+}
+this._hideProgress();
+if (!State.cachedRouteJSON) {
+this.showNotice('⚠️ 無法下載路線資料，請確認網路連線', 'error'); return;
+}
+this._populateVillageSelect(State.cachedRouteJSON, district);
+this._activateStep(2);
+},
+/* ════════════════════════════════════════════════
+STEP 2 — VILLAGE SELECTION
+════════════════════════════════════════════════ */
+_populateVillageSelect(routeJSON, district) {
+const sample = routeJSON[0] || {};
+const cityField    = 'city'    in sample ? 'city'    : ('行政區' in sample ? '行政區' : 'city');
+const villageField = 'village' in sample ? 'village' : ('里'     in sample ? '里'     : 'village');
+console.log('[GarbageTruck] First JSON row fields:', Object.keys(sample));
+console.log('[GarbageTruck] First row city value:', sample[cityField]);
+console.log('[GarbageTruck] District filter:', district);
+const districtCore = district.replace(/[區鄉鎮市]$/, '');
+const filtered = routeJSON.filter(r => {
+const cityVal = (r[cityField] || '').trim();
+return cityVal === district
+|| cityVal.includes(districtCore);
+});
+console.log('[GarbageTruck] Filtered rows for district:', filtered.length);
+if (!filtered.length) {
+this.showNotice(`⚠️ 在「${district}」找不到任何路線資料，請確認行政區是否正確`, 'error');
+return;
+}
+const villages = [...new Set(
+filtered
+.map(r => (r[villageField] || '').trim())
+.filter(Boolean)
+)].sort((a, b) => this._strokeSort(a, b));
+console.log('[GarbageTruck] Villages found:', villages.length, villages.slice(0, 10));
+const sel = document.getElementById('villageSelect');
+sel.innerHTML = '<option value="">── 請選擇里別 ──</option>' +
+villages.map(v => `<option value="${v}">${v}</option>`).join('');
+State._cityField    = cityField;
+State._villageField = villageField;
+document.getElementById('villageSection').classList.add('visible');
+},
+_strokeSort(a, b) {
+const clean = s => s.replace(/[里村鄰]$/, '');
+const ca = clean(a), cb = clean(b);
+for (let i = 0; i < Math.min(ca.length, cb.length); i++) {
+if (ca[i] !== cb[i]) return ca.charCodeAt(i) - cb.charCodeAt(i);
+}
+return ca.length - cb.length;
+},
+onVillageChange(village) {
+if (!village) return;
+State.currentVillage = village;
+this._renderRouteList(State.cachedRouteJSON, State.currentDistrict, village);
+this._activateStep(3);
+},
+/* ════════════════════════════════════════════════
+STEP 3 — ROUTE LIST
+════════════════════════════════════════════════ */
+_renderRouteList(routeJSON, district, village) {
+const dayKeys = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'];
+const dayNames = ['日','一','二','三','四','五','六'];
+const todayKey = todayDayKey();
+const cityField    = State._cityField    || 'city';
+const villageField = State._villageField || 'village';
+const districtCore = district.replace(/[區鄉鎮市]$/, '');
+const stops = routeJSON.filter(r => {
+const cityVal    = (r[cityField]    || '').trim();
+const villageVal = (r[villageField] || '').trim();
+const cityMatch  = cityVal === district || cityVal.includes(districtCore);
+const villMatch  = villageVal === village;
+return cityMatch && villMatch;
+});
+console.log('[GarbageTruck] Route stops for', district, village, ':', stops.length);
+if (!stops.length) {
+document.getElementById('routeArea').innerHTML =
+'<p style="font-size:16px;color:var(--text-secondary);padding:8px 0;">此里別找不到收運路線，請重新選擇</p>';
+document.getElementById('routeArea').classList.add('visible');
+return;
+}
+const lineidField   = 'lineid'   in (stops[0]||{}) ? 'lineid'   : '路線編號';
+const linenameField = 'linename' in (stops[0]||{}) ? 'linename' : '路線名稱';
+const nameField     = 'name'     in (stops[0]||{}) ? 'name'     : '清運點名稱';
+const timeField     = 'time'     in (stops[0]||{}) ? 'time'     : '表定時間';
+const byLine = {};
+stops.forEach(r => {
+const id = r[lineidField] || r.lineid || '';
+if (!id) return;
+if (!byLine[id]) {
+byLine[id] = {
+...r,
+lineid:   id,
+linename: r[linenameField] || r.linename || id,
+time:     r[timeField]     || r.time     || '',
+_stopNames: [],
+};
+}
+const stopName = r[nameField] || r.name || '';
+if (stopName) byLine[id]._stopNames.push(stopName);
+});
+State.sel = { noon: null, night: null };
+State.checkedRoutes = new Set();
+const routes = Object.values(byLine).sort((a, b) => {
+const aH = parseInt((a.time || '0').split(':')[0]);
+const bH = parseInt((b.time || '0').split(':')[0]);
+return aH - bH;
+});
+const isNight = r => {
+const h = parseInt((r.time || '0').split(':')[0]);
+return h >= 17;
+};
+const isToday = r => {
+const key1 = 'garbage' + todayKey;
+const key2 = 'Garbage' + todayKey[0].toUpperCase() + todayKey.slice(1);
+const v = r[key1] || r[key2] || '';
+return v === 'Y' || v === '1' || v === true || v === 'true';
+};
+const collectDays = (r, prefix) => {
+const active = dayKeys.filter(k => {
+const v = r[prefix + k] || r[prefix + k[0].toUpperCase() + k.slice(1)] || '';
+return v === 'Y' || v === '1' || v === true || v === 'true';
+});
+if (!active.length) return null;
+if (active.length === 7) return '每天收運';
+return '每週' + active.map(k => dayNames[dayKeys.indexOf(k)]).join('、') + ' 收運';
+};
+const html = routes.map((r, i) => {
+const night = isNight(r);
+const today = isToday(r);
+const stopSample = r._stopNames.slice(0, 3).join('、') + (r._stopNames.length > 3 ? '…' : '');
+const garbageDays = collectDays(r, 'garbage');
+const nightTag = night
+? '<span class="tag-night">🌙 晚上班</span>' : '<span class="tag-today" style="background:#c07800;">☀️ 白天班</span>';
+const todayTag = today
+? '<span class="tag-today" style="margin-left:6px;">今天收運</span>' : '';
+return `<div class="route-item" id="ri_${i}" onclick="App.toggleRoute(${i}, '${r.lineid}')">
+<div class="route-check" id="rc_${i}">✓</div>
+<div class="route-info">
+<div class="route-name">${r.linename || ('路線 ' + r.lineid)} ${nightTag} ${todayTag}</div>
+<div class="route-lineid">路線代號：${r.lineid}</div>
+<div class="route-time">⏰ 表定時間：${r.time || '未知'}</div>
+<div class="route-days">📅 ${garbageDays}</div>
+${stopSample ? `<div class="route-stops">📌 清運點：${stopSample}</div>` : ''}
+</div>
+</div>`;
+}).join('');
+document.getElementById('routeArea').innerHTML = html;
+document.getElementById('routeArea').classList.add('visible');
+document.getElementById('step3desc').textContent =
+`${village} 共有 ${routes.length} 條路線，請勾選您要追蹤的路線（可複選）`;
+document.getElementById('selSummary').classList.add('hidden');
+this._activateStep(4);
+},
+_routeList: [],
+toggleRoute(idx, lineid) {
+const item = document.getElementById(`ri_${idx}`);
+const check = document.getElementById(`rc_${idx}`);
+if (!item) return;
+if (State.checkedRoutes.has(lineid)) {
+State.checkedRoutes.delete(lineid);
+item.classList.remove('checked');
+} else {
+State.checkedRoutes.add(lineid);
+item.classList.add('checked');
+}
+this._updateSelSummary();
+},
+_updateSelSummary() {
+const summary = document.getElementById('selSummary');
+if (!State.checkedRoutes.size) {
+summary.classList.add('hidden');
+return;
+}
+const lines = [...State.checkedRoutes].map(id => {
+const r = State.cachedRouteJSON
+? State.cachedRouteJSON.find(x => x.lineid === id) : null;
+return `✅ <strong>${r ? (r.linename || id) : id}</strong>（${r ? r.time : ''}）`;
+});
+summary.innerHTML = '已選擇：<br>' + lines.join('<br>');
+summary.classList.remove('hidden');
+},
+/* ════════════════════════════════════════════════
+SAVE SETTINGS
+════════════════════════════════════════════════ */
+saveSettings() {
+if (!State.currentDistrict) {
+this.showNotice('⚠️ 請先完成步驟 1：確認您的位置', 'error'); return;
+}
+if (!State.currentVillage) {
+this.showNotice('⚠️ 請先完成步驟 2：選擇您所在的里', 'error'); return;
+}
+if (!State.checkedRoutes || !State.checkedRoutes.size) {
+this.showNotice('⚠️ 請在步驟 3 中勾選至少一條路線', 'error'); return;
+}
+const routeJSON = State.cachedRouteJSON || [];
+const checked = [...State.checkedRoutes];
+const noonRoutes  = checked.filter(id => {
+const r = routeJSON.find(x => x.lineid === id);
+return r && parseInt((r.time || '0').split(':')[0]) < 17;
+});
+const nightRoutes = checked.filter(id => {
+const r = routeJSON.find(x => x.lineid === id);
+return r && parseInt((r.time || '0').split(':')[0]) >= 17;
+});
+State.sel.noon  = noonRoutes[0]  || nightRoutes[0] || checked[0];
+State.sel.night = nightRoutes[0] || noonRoutes[0]  || checked[0];
+State.allCheckedRoutes = checked;
+State.routeData.noon  = routeJSON.filter(r => r.lineid === State.sel.noon)
+.reduce((acc, r) => { if (!acc.find(x => x.lineid === r.lineid)) acc.push({...r, _dist: 0}); return acc; }, []);
+State.routeData.night = routeJSON.filter(r => r.lineid === State.sel.night)
+.reduce((acc, r) => { if (!acc.find(x => x.lineid === r.lineid)) acc.push({...r, _dist: 0}); return acc; }, []);
+saveToStorage();
+this.showScreen('tracking');
+},
+/* ════════════════════════════════════════════════
+DOWNLOAD ROUTE JSON
+════════════════════════════════════════════════ */
+async _downloadRouteJSON() {
+this._showProgress('載入路線資料中…');
+let csvText = null;
+const localCSV = new URL('./routes.csv', location.href).href;
+const extCSV   = CSV_FULL;
+const candidates = [
+localCSV,
+`https://corsproxy.io/?${encodeURIComponent(extCSV)}`,
+`https://api.allorigins.win/raw?url=${encodeURIComponent(extCSV)}`,
+`https://thingproxy.freeboard.io/fetch/${extCSV}`,
+];
+for (const u of candidates) {
+try {
+console.log('[GarbageTruck] Trying:', u.slice(0, 80));
+const r = await fetch(u, { cache: 'default' });
+if (r.ok) {
+const text = await r.text();
+if (text.length > 500 && (text.includes('lineid') || text.includes('路線編號'))) {
+csvText = text;
+console.log('[GarbageTruck] Success:', u.slice(0, 80), '— size:', text.length);
+break;
+}
+console.warn('[GarbageTruck] Response too small or not CSV (', text.length, 'bytes):', u.slice(0,80));
+} else {
+console.warn('[GarbageTruck] HTTP', r.status, ':', u.slice(0, 80));
+}
+} catch (e) {
+console.warn('[GarbageTruck] Error:', e.message, ':', u.slice(0, 80));
+}
+}
+if (!csvText) {
+this.showNotice(
+'⚠️ 無法載入路線資料。請確認 routes.csv 已放入 GitHub repo 根目錄，再重新整理頁面。',
+'error'
+);
+return [];
+}
+this._showProgress('解析資料中…');
+const rows = this._parseCSV(csvText);
+console.log('[GarbageTruck] Parsed', rows.length, 'rows. Fields:', Object.keys(rows[0] || {}));
+return rows;
+},
+_parseCSV(text) {
+if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+if (lines.length < 2) return [];
+const headers = this._csvSplitLine(lines[0]);
+const rows = [];
+for (let i = 1; i < lines.length; i++) {
+const line = lines[i].trim();
+if (!line) continue;
+const vals = this._csvSplitLine(line);
+if (vals.length < 2) continue;
+const obj = {};
+headers.forEach((h, idx) => {
+obj[h.trim()] = (vals[idx] || '').trim();
+});
+rows.push(obj);
+}
+return rows;
+},
+_csvSplitLine(line) {
+const result = [];
+let cur = '', inQ = false;
+for (let i = 0; i < line.length; i++) {
+const ch = line[i];
+if (ch === '"') { inQ = !inQ; }
+else if (ch === ',' && !inQ) { result.push(cur); cur = ''; }
+else { cur += ch; }
+}
+result.push(cur);
+return result;
+},
+/* ════════════════════════════════════════════════
+UI HELPERS
+════════════════════════════════════════════════ */
+_setGpsBtn(loading, label) {
+document.getElementById('gpsBtn').disabled = loading;
+document.getElementById('gpsSpinner').classList.toggle('visible', loading);
+document.getElementById('gpsBtnText').textContent = label;
+},
+_showProgress(msg) {
+const el = document.getElementById('step1Progress');
+document.getElementById('step1ProgressMsg').textContent = msg;
+el.classList.add('visible');
+},
+_hideProgress() {
+document.getElementById('step1Progress').classList.remove('visible');
+},
+_activateStep(n) {
+for (let i = 1; i <= 4; i++) {
+const el = document.getElementById('snum' + i);
+if (el) el.classList.toggle('active', i <= n);
+}
+},
+updateDist(val) {
+const v = parseInt(val);
+State.distAlert = v;
+const label = v >= 1000 ? '1 公里' : v + ' 公尺';
+document.getElementById('distDisplay').textContent = label;
+document.getElementById('distHint').innerHTML =
+`垃圾車進入 <strong>${label}</strong>範圍時，開始每 2 分鐘語音播報一次`;
+},
+onVoiceTypeChange(type) {
+State.voiceType = type;
+const row = document.getElementById('customVoiceRow');
+if (type === 'custom') {
+row.classList.add('visible');
+} else {
+row.classList.remove('visible');
+document.getElementById('customVoiceCode').value = '';
+document.getElementById('customVoiceStatus').classList.add('hidden');
+State.customVoiceEnabled = false;
+}
+},
+onCustomCodeInput(val) {
+if (val === '1212') {
+State.customVoiceEnabled = true;
+document.getElementById('customVoiceStatus').classList.remove('hidden');
+} else {
+State.customVoiceEnabled = false;
+document.getElementById('customVoiceStatus').classList.add('hidden');
+}
+},
+/* ════════════════════════════════════════════════
+TRACKING SCREEN
+════════════════════════════════════════════════ */
+initTrackingScreen() {
+this._autoSelectRouteByTime();
+this._initMap();
+this._acquireWakeLock();
+this.requestLocation();
+},
+/* ── Map init ── */
+_initMap() {
+if (State.map) {
+setTimeout(() => {
+try { State.map.invalidateSize({ animate: false }); } catch(e) {}
+if (State.userLat) {
+try {
+State.map.setView([State.userLat, State.userLng], 15, { animate: false });
+} catch(e) {}
+}
+}, 300);
+return;
+}
+const doCreate = () => {
+try {
+const lat = State.userLat || 25.014;
+const lng = State.userLng || 121.468;
+State.map = L.map('map', {
+zoomControl:      false,
+attributionControl: false,
+dragging:         true,
+tap:              true,
+}).setView([lat, lng], 15);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+maxZoom:     19,
+attribution: '',
+}).addTo(State.map);
+L.control.zoom({ position: 'bottomleft' }).addTo(State.map);
+setTimeout(() => {
+try { State.map.invalidateSize({ animate: false }); } catch(e) {}
+if (State.userLat) this._updateUserMarker();
+}, 300);
+console.log('[GarbageTruck] Map created');
+} catch(e) {
+console.error('[GarbageTruck] Map init error:', e);
+}
+};
+setTimeout(doCreate, 400);
+},
+relocateMap() {
+if (!State.map) return;
+if (State.userLat) {
+State.map.flyTo([State.userLat, State.userLng], 15, { duration: 0.8 });
+} else {
+this.requestLocation();
+}
+},
+_makeUserIcon() {
+return L.divIcon({
+className: '',
+html: `<div style="width:18px;height:18px;border-radius:50%;
+background:#1a52a8;border:3px solid #fff;
+box-shadow:0 1px 6px rgba(0,0,0,0.4)"></div>`,
+iconSize: [18,18], iconAnchor: [9,9],
+});
+},
+_updateUserMarker() {
+if (!State.map || !State.userLat) return;
+if (State.markers.user) {
+State.markers.user.setLatLng([State.userLat, State.userLng]);
+} else {
+State.markers.user = L.marker([State.userLat, State.userLng], { icon: this._makeUserIcon() })
+.addTo(State.map).bindPopup('您的位置');
+}
+},
+_updateTruckMarker(lat, lng, name) {
+const icon = L.divIcon({
+className: '',
+html: `<div style="font-size:28px;line-height:1;
+filter:drop-shadow(0 2px 3px rgba(0,0,0,0.4))">🚛</div>`,
+iconSize: [32,28], iconAnchor: [16,24],
+});
+if (State.markers.truck) {
+State.markers.truck.setLatLng([lat, lng]);
+} else {
+State.markers.truck = L.marker([lat, lng], { icon })
+.addTo(State.map).bindPopup(name || '垃圾車');
+}
+const pts = [[lat, lng]];
+if (State.userLat) pts.push([State.userLat, State.userLng]);
+State.map.fitBounds(pts, { padding: [48, 48], maxZoom: 17 });
+},
+/* ── GPS / location ── */
+requestLocation() {
+if (!navigator.geolocation) return;
+const opts = { enableHighAccuracy: true, maximumAge: 10000 };
+const onSuccess = pos => {
+State.userLat = pos.coords.latitude;
+State.userLng = pos.coords.longitude;
+this._updateUserMarker();
+};
+const onError = err => console.warn('Geolocation', err.code, err.message);
+navigator.geolocation.getCurrentPosition(onSuccess, onError, opts);
+if (!State.geoWatchId) {
+State.geoWatchId = navigator.geolocation.watchPosition(onSuccess, onError, opts);
+}
+},
+/* ── Wake Lock ── */
+async _acquireWakeLock() {
+if ('wakeLock' in navigator) {
+try {
+State.wakeLock = await navigator.wakeLock.request('screen');
+State.wakeLock.addEventListener('release', () => {
+document.addEventListener('visibilitychange', () => {
+if (!document.hidden && State.tracking) this._acquireWakeLock();
+}, { once: true });
+});
+document.getElementById('wakeBanner').classList.remove('visible');
+console.log('[GarbageTruck] Wake Lock acquired');
+} catch (e) {
+console.warn('[GarbageTruck] Wake Lock failed:', e.message);
+document.getElementById('wakeBanner').classList.add('visible');
+}
+} else {
+document.getElementById('wakeBanner').classList.add('visible');
+}
+},
+_releaseWakeLock() {
+if (State.wakeLock) {
+State.wakeLock.release();
+State.wakeLock = null;
+}
+},
+/* ── Tracking control ── */
+toggleTracking() {
+State.tracking ? this._stopTracking() : this._startTracking();
+},
+_startTracking() {
+if (!State.userLat) {
+this.requestLocation();
+setTimeout(() => {
+if (State.userLat) this._startTracking();
+else this.showNotice('⚠️ 請允許定位權限', 'error');
+}, 4000);
+return;
+}
+this._autoSelectRouteByTime();
+State.tracking = true;
+this._acquireWakeLock();
+const btn = document.getElementById('trackBtn');
+btn.className = 'track-btn stop';
+btn.textContent = '⏹ 停止監控';
+document.getElementById('trackSub').textContent = '監控中';
+document.getElementById('heroUpdDot').style.background = '#7ef0a8';
+this._fetchAndUpdate();
+},
+_stopTracking() {
+State.tracking = false;
+clearTimeout(State.updateTimer);
+this._releaseWakeLock();
+const btn = document.getElementById('trackBtn');
+btn.className = 'track-btn start';
+btn.textContent = '▶ 開始監控垃圾車位置';
+document.getElementById('trackSub').textContent = '已停止';
+document.getElementById('heroUpdDot').style.background = '#bbb';
+document.getElementById('heroUpdTime').textContent = '—';
+},
+/* ── Auto-select route by time ── */
+_autoSelectRouteByTime() {
+const routes = State.allCheckedRoutes || [];
+if (!routes.length) return;
+const info = {};
+(State.savedRouteInfo || []).forEach(r => { info[r.lineid] = r; });
+if (State.cachedRouteJSON) {
+State.cachedRouteJSON.forEach(r => {
+if (!info[r.lineid]) info[r.lineid] = r;
+});
+}
+const nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+let best = null, bestScore = Infinity;
+routes.forEach(id => {
+const row = info[id];
+if (!row || !row.time) return;
+const parts = row.time.split(':').map(Number);
+const hh = parts[0], mm = parts[1] || 0;
+if (isNaN(hh)) return;
+const rMin = hh * 60 + mm;
+const diff = rMin - nowMin;
+const score = diff >= 0 ? diff : diff + 1440;
+if (score < bestScore) { bestScore = score; best = id; }
+});
+State.activeLineid = best || routes[0];
+const dayR   = routes.filter(id => {
+const r = info[id];
+if (!r || !r.time) return false;
+return parseInt(r.time.split(':')[0]) < 17;
+});
+const nightR = routes.filter(id => {
+const r = info[id];
+if (!r || !r.time) return false;
+return parseInt(r.time.split(':')[0]) >= 17;
+});
+State.sel.noon  = dayR[0]   || nightR[0] || routes[0];
+State.sel.night = nightR[0] || dayR[0]   || routes[0];
+State.activeTab = new Date().getHours() >= 17 ? 'night' : 'noon';
+console.log('[GarbageTruck] Active route:', State.activeLineid);
+},
+/* ── GPS fetch loop ── */
+async _fetchAndUpdate() {
+if (!State.tracking) return;
+document.getElementById('heroUpdTime').textContent = '更新中…';
+try {
+const data = await fetchJSON(API_GPS);
+State.gpsData = Array.isArray(data) ? data : (data.result || []);
+this._processGPS();
+} catch (e) {
+console.warn('[GarbageTruck] GPS fetch error', e);
+document.getElementById('heroUpdTime').textContent = '更新失敗';
+}
+State.updateTimer = setTimeout(() => this._fetchAndUpdate(), UPDATE_MS);
+},
+_processGPS() {
+if (!State.userLat) return;
+const lineid = State.activeLineid || State.sel[State.activeTab];
+if (!lineid) return;
+const truck = State.gpsData.find(g => g.lineid === lineid);
+const now = new Date();
+const timeStr = now.getHours() + ':' +
+String(now.getMinutes()).padStart(2, '0') + ':' +
+String(now.getSeconds()).padStart(2, '0');
+document.getElementById('heroUpdTime').textContent = timeStr + ' 更新';
+if (!truck) {
+document.getElementById('heroDistNum').textContent = '—';
+document.getElementById('heroDistUnit').textContent = '公尺';
+document.getElementById('heroEtaVal').textContent = '車輛尚未出勤';
+return;
+}
+const tLat = parseFloat(truck.latitude);
+const tLng = parseFloat(truck.longitude);
+const dist  = haversine(State.userLat, State.userLng, tLat, tLng);
+document.getElementById('heroDistNum').textContent =
+dist >= 1000 ? (dist / 1000).toFixed(1) : dist;
+document.getElementById('heroDistUnit').textContent =
+dist >= 1000 ? '公里' : '公尺';
+document.getElementById('heroEtaVal').textContent = etaText(dist);
+const truckRow = (State.cachedRouteJSON || []).find(r => r.lineid === lineid);
+this._updateTruckMarker(tLat, tLng, truckRow ? truckRow.linename : lineid);
+const bar = document.getElementById('statusBar');
+if (dist <= 200) {
+bar.className = 'status-bar danger';
+this._playAudio('垃圾車即將到達請準備');
+if (dist <= 80) this._showArrived();
+} else if (dist <= State.distAlert) {
+bar.className = 'status-bar warning';
+this._playAudio(this._distanceAudioKey(dist));
+} else {
+bar.className = 'status-bar';
+}
+},
+/* ════════════════════════════════════════════════
+VOICE ENGINE
+════════════════════════════════════════════════ */
+toggleVoice() {
+State.voiceOn = !State.voiceOn;
+document.getElementById('voiceToggle').className =
+'toggle-wrap' + (State.voiceOn ? '' : ' off');
+this._syncVoiceTypeFromDOM();
+if (State.voiceOn) {
+this._playAudioForce('您已開啟語音提醒請自行調整音量');
+} else {
+this._playAudioForce('您已關閉語音提醒');
+}
+},
+_syncVoiceTypeFromDOM() {
+const checked = document.querySelector('input[name="voiceType"]:checked');
+if (checked) {
+State.voiceType = checked.value;
+}
+const code = document.getElementById('customVoiceCode');
+if (code) {
+State.customVoiceEnabled = (code.value === '1212');
+}
+},
+_playAudio(textKey) {
+if (!State.voiceOn) return;
+this._playAudioForce(textKey);
+},
+_playAudioForce(textKey) {
+if (State.voiceType === 'custom' && State.customVoiceEnabled) {
+this._playMP3(textKey);
+} else {
+this._speakTTS(textKey);
+}
+},
+async _playMP3(filename) {
+if (State.currentAudio) {
+try { State.currentAudio.stop(); } catch(e) {}
+State.currentAudio = null;
+}
+const url = `audio/${filename}.mp3`;
+try {
+if (!State.audioCtx) {
+State.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+}
+if (State.audioCtx.state === 'suspended') {
+await State.audioCtx.resume();
+}
+const resp = await fetch(url);
+if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+const arrayBuffer = await resp.arrayBuffer();
+const audioBuffer  = await State.audioCtx.decodeAudioData(arrayBuffer);
+const source   = State.audioCtx.createBufferSource();
+const gainNode = State.audioCtx.createGain();
+source.buffer = audioBuffer;
+gainNode.gain.setValueAtTime(2.5, State.audioCtx.currentTime);
+source.connect(gainNode);
+gainNode.connect(State.audioCtx.destination);
+source.start(0);
+State.currentAudio = source;
+console.log('[GarbageTruck] Playing MP3 (boosted):', filename);
+source.onended = () => { State.currentAudio = null; };
+} catch(e) {
+console.warn('[GarbageTruck] MP3 failed, falling back to TTS:', filename, e.message);
+this._speakTTS(filename);
+}
+},
+_unlockAudio() {
+if (State.audioCtx) return;
+try {
+State.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+const buf = State.audioCtx.createBuffer(1, 1, 22050);
+const src = State.audioCtx.createBufferSource();
+src.buffer = buf;
+src.connect(State.audioCtx.destination);
+src.start(0);
+} catch(e) {}
+},
+_speakTTS(text) {
+if (!window.speechSynthesis) return;
+window.speechSynthesis.cancel();
+const u = new SpeechSynthesisUtterance(text);
+u.lang = 'zh-TW'; u.rate = 0.88; u.volume = 1;
+const voices = window.speechSynthesis.getVoices().filter(v =>
+v.lang.startsWith('zh') || v.lang.startsWith('cmn')
+);
+if (voices.length > 0) {
+if (State.voiceType === 'male') {
+u.voice = voices.find(v => /male|man|男/i.test(v.name)) || voices[1] || voices[0];
+} else {
+u.voice = voices.find(v => /female|woman|女/i.test(v.name)) || voices[0];
+}
+}
+window.speechSynthesis.speak(u);
+},
+_distanceAudioKey(dist) {
+if (dist <= 100) return '垃圾車距離您200公尺';
+const seg = Math.ceil(dist / 100) * 100;
+const capped = Math.min(seg, 1000);
+return `垃圾車距離您${capped}公尺`;
+},
+/* ── Arrived overlay ── */
+_showArrived() {
+if (State.arrivedShown) return;
+State.arrivedShown = true;
+document.getElementById('arrived-overlay').classList.add('visible');
+this._playAudioForce('垃圾車到了請準備');
+},
+dismissArrived() {
+document.getElementById('arrived-overlay').classList.remove('visible');
+this._stopTracking();
+},
+/* ── Visibility change ── */
+_handleVisibility() {
+if (!document.hidden && State.tracking) {
+this._acquireWakeLock();
+clearTimeout(State.updateTimer);
+this._fetchAndUpdate();
+}
+},
+};
 /* ── Visibility API ── */
 document.addEventListener('visibilitychange', () => App._handleVisibility());
-
 /* ── Service Worker registration ── */
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(console.warn);
-  });
+window.addEventListener('load', () => {
+navigator.serviceWorker.register('sw.js').catch(console.warn);
+});
 }
-
 /* ── Unlock AudioContext on first user gesture ── */
 document.addEventListener('click', () => App._unlockAudio(), { once: true });
 document.addEventListener('touchstart', () => App._unlockAudio(), { once: true });
-
 /* ── Boot ── */
 App.init();
 </script>
