@@ -927,6 +927,21 @@ const State = {
   savedRouteInfo:      [],   // [{lineid, linename, time}] persisted to localStorage
   _cityField:          'city',
   _villageField:       'village',
+
+  /* ── Dead Reckoning (position interpolation between API updates) ── */
+  dr: {
+    curLat:       null,  // last real GPS fix latitude
+    curLng:       null,  // last real GPS fix longitude
+    curTs:        null,  // timestamp of last real fix (ms)
+    vLat:         0,     // velocity: degrees-lat per millisecond
+    vLng:         0,     // velocity: degrees-lng per millisecond
+    speedKmh:     0,     // computed truck speed km/h (sanity check)
+    timer:        null,  // setInterval handle for DR ticks (every 5s)
+    isEstimate:   false, // true when showing interpolated position
+    lastVoiceDist: null, // last distance we announced aloud
+    lastVoiceTs:   0,    // timestamp of last voice announcement (ms)
+  },
+  userPanning: false,    // true while user is dragging the map (suppress auto-fit)
 };
 
 /* ═══════════════════════════════════════════════════
@@ -1874,11 +1889,18 @@ const App = {
         const lng = State.userLng || 121.468;
 
         State.map = L.map('map', {
-          zoomControl:      false,
+          zoomControl:        false,
           attributionControl: false,
-          dragging:         true,
-          tap:              true,
+          dragging:           true,
+          tap:                true,
         }).setView([lat, lng], 15);
+
+        // Detect user panning so we don't fight them with auto-fit
+        State.map.on('dragstart', () => { State.userPanning = true;  });
+        State.map.on('dragend',   () => {
+          // Resume auto-fit after 15 seconds of no dragging
+          setTimeout(() => { State.userPanning = false; }, 15000);
+        });
 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
           maxZoom:     19,
@@ -1933,23 +1955,36 @@ const App = {
     }
   },
 
-  _updateTruckMarker(lat, lng, name) {
+  _updateTruckMarker(lat, lng, name, isEstimate) {
+    if (!State.map) return;
+    // Real fix: solid 🚛  |  Estimated: slightly faded with 🔵 dot overlay
+    const opacity = isEstimate ? '0.70' : '1.0';
+    const badge   = isEstimate
+      ? '<div style="position:absolute;top:-4px;right:-4px;width:12px;height:12px;border-radius:50%;background:#f0c040;border:1.5px solid #fff;"></div>'
+      : '';
+    const html = `<div style="position:relative;display:inline-block;">
+      <div style="font-size:28px;line-height:1;opacity:${opacity};
+        filter:drop-shadow(0 2px 3px rgba(0,0,0,0.4))">🚛</div>
+      ${badge}
+    </div>`;
     const icon = L.divIcon({
-      className: '',
-      html: `<div style="font-size:28px;line-height:1;
-               filter:drop-shadow(0 2px 3px rgba(0,0,0,0.4))">🚛</div>`,
-      iconSize: [32,28], iconAnchor: [16,24],
+      className: '', html,
+      iconSize: [34,28], iconAnchor: [17,24],
     });
     if (State.markers.truck) {
       State.markers.truck.setLatLng([lat, lng]);
+      State.markers.truck.setIcon(icon);
     } else {
       State.markers.truck = L.marker([lat, lng], { icon })
-        .addTo(State.map).bindPopup(name || '垃圾車');
+        .addTo(State.map)
+        .bindPopup(isEstimate ? (name + '（推算位置）') : name);
     }
-    // Fit both markers in view
-    const pts = [[lat, lng]];
-    if (State.userLat) pts.push([State.userLat, State.userLng]);
-    State.map.fitBounds(pts, { padding: [48, 48], maxZoom: 17 });
+    // Fit both markers in view (only when not user-panning)
+    if (!State.userPanning) {
+      const pts = [[lat, lng]];
+      if (State.userLat) pts.push([State.userLat, State.userLng]);
+      State.map.fitBounds(pts, { padding: [48, 48], maxZoom: 17, animate: false });
+    }
   },
 
   /* ── GPS / location ── */
@@ -2025,8 +2060,10 @@ const App = {
 
     this._autoSelectRouteByTime();
     this._updateActivePill();
+    this._resetDR();              // start fresh — no stale velocity from previous session
 
     State.tracking = true;
+    State.arrivedShown = false;   // allow arrived overlay again
     this._acquireWakeLock();
 
     const btn = document.getElementById('trackBtn');
@@ -2035,7 +2072,8 @@ const App = {
     document.getElementById('trackSub').textContent = '監控中';
     document.getElementById('heroUpdDot').style.background = '#7ef0a8';
 
-    this._fetchAndUpdate();
+    this._fetchAndUpdate();       // first real GPS fetch immediately
+    this._startDRTimer();         // begin 5s DR ticks
     this._startCountdown();
   },
 
@@ -2043,6 +2081,8 @@ const App = {
     State.tracking = false;
     clearTimeout(State.updateTimer);
     clearInterval(State.countdownTimer);
+    this._stopDRTimer();          // stop dead-reckoning ticks
+    this._resetDR();              // clear velocity so next session starts clean
     this._releaseWakeLock();
 
     const btn = document.getElementById('trackBtn');
@@ -2052,7 +2092,18 @@ const App = {
     document.getElementById('heroUpdDot').style.background = '#bbb';
     document.getElementById('heroUpdTime').textContent = '—';
     document.getElementById('countdownRow').textContent = '';
-    this._setAlert('info','⏸','監控已停止','按「開始監控」重新啟動');
+    this._showRouteInfoOnHero();  // restore route summary
+  },
+
+  // Reset dead-reckoning state between sessions
+  _resetDR() {
+    const dr     = State.dr;
+    dr.curLat    = null; dr.curLng  = null; dr.curTs   = null;
+    dr.vLat      = 0;    dr.vLng    = 0;    dr.speedKmh = 0;
+    dr.isEstimate     = false;
+    dr.lastVoiceDist  = null;
+    dr.lastVoiceTs    = 0;
+    State.userPanning = false;
   },
 
   /* ── Auto-select route by time ── */
@@ -2132,79 +2183,254 @@ const App = {
       '| info:', info[State.activeLineid]);
   },
 
-  /* ── GPS fetch loop ── */
+  /* ════════════════════════════════════════════════
+     GPS FETCH + DEAD RECKONING ENGINE
+     
+     Architecture:
+     ┌─────────────────────────────────────────────┐
+     │ _fetchAndUpdate()  every 30s                │
+     │   → calls Gov API                           │
+     │   → on new fix: update dr state + velocity  │
+     │   → starts _drTick() interval if not running│
+     └─────────────────────────────────────────────┘
+     ┌─────────────────────────────────────────────┐
+     │ _drTick()  every 5s                         │
+     │   → interpolates truck position             │
+     │   → updates UI + map + voice               │
+     └─────────────────────────────────────────────┘
+  ════════════════════════════════════════════════ */
+
+  /* ════════════════════════════════════════════════════════════════════════
+     GPS FETCH + DEAD RECKONING ENGINE
+
+     Timeline (垃圾車 GPS 每 2 分鐘才更新一次):
+
+     t=0s    ── 第一次真實 GPS fix → 記錄位置 A
+     t=5s    ── DR tick：無速度向量，顯示位置 A（真實）
+     t=120s  ── 第二次真實 GPS fix → 記錄位置 B
+               計算速度向量 = (B - A) / 120s
+     t=125s  ── DR tick：估算 = B + v × 5s
+     t=130s  ── DR tick：估算 = B + v × 10s  ← 顯示「推算」標示
+     ...
+     t=240s  ── 第三次真實 GPS fix → 修正位置，重算速度向量
+  ════════════════════════════════════════════════════════════════════════ */
+
   async _fetchAndUpdate() {
     if (!State.tracking) return;
-    document.getElementById('heroUpdTime').textContent = '更新中…';
+
+    document.getElementById('heroUpdDot').style.background = '#f0c040'; // yellow = fetching
     try {
       const data = await fetchJSON(API_GPS);
-      State.gpsData = Array.isArray(data) ? data : (data.result || []);
-      this._processGPS();
+      const raw  = Array.isArray(data) ? data : (data.result || []);
+      State.gpsData = raw;
+      this._onNewGPSFix(raw);
     } catch (e) {
-      console.warn('[GarbageTruck] GPS fetch error', e);
-      document.getElementById('heroUpdTime').textContent = '更新失敗';
+      console.warn('[GarbageTruck] GPS fetch error:', e.message);
+      document.getElementById('heroUpdDot').style.background = '#e08030'; // orange = error
     }
+
+    // Schedule next API call in 30 seconds
     State.updateTimer = setTimeout(() => this._fetchAndUpdate(), UPDATE_MS);
   },
 
-  _processGPS() {
-    if (!State.userLat) return;
+  /* ── Called when a new real GPS position arrives from the government API ── */
+  _onNewGPSFix(gpsData) {
     const lineid = State.activeLineid || State.sel[State.activeTab];
     if (!lineid) return;
 
-    const truck = State.gpsData.find(g => g.lineid === lineid);
-    const now = new Date();
-    const timeStr = now.getHours() + ':' +
-      String(now.getMinutes()).padStart(2, '0') + ':' +
-      String(now.getSeconds()).padStart(2, '0');
-    document.getElementById('heroUpdTime').textContent = timeStr + ' 更新';
-
+    const truck = gpsData.find(g => g.lineid === lineid);
     if (!truck) {
-      this._setHeroNoTruck();
+      // Vehicle not in the API response = not yet deployed today
+      // Keep showing last estimated position if we have one
+      if (State.dr.curLat === null) this._setHeroNoTruck();
       return;
     }
 
-    const tLat = parseFloat(truck.latitude);
-    const tLng = parseFloat(truck.longitude);
-    const dist  = haversine(State.userLat, State.userLng, tLat, tLng);
+    const newLat = parseFloat(truck.latitude);
+    const newLng = parseFloat(truck.longitude);
+    const nowMs  = Date.now();
+    const dr     = State.dr;
 
-    // Update hero card
-    document.getElementById('heroDistNum').textContent =
-      dist >= 1000 ? (dist / 1000).toFixed(1) : dist;
-    document.getElementById('heroDistUnit').textContent =
-      dist >= 1000 ? '公里' : '公尺';
-    document.getElementById('heroEtaVal').textContent = etaText(dist);
+    // ── Compute velocity vector from previous fix → this fix ────────────
+    if (dr.curLat !== null) {
+      const dtMs  = nowMs - dr.curTs;
+      const distM = haversine(dr.curLat, dr.curLng, newLat, newLng);
 
-    // Update map
-    const truckRow = (State.cachedRouteJSON || []).find(r => r.lineid === lineid);
-    this._updateTruckMarker(tLat, tLng, truckRow ? truckRow.linename : lineid);
+      if (dtMs > 0 && dtMs < 6 * 60 * 1000) {  // gap must be < 6 minutes
+        const speedMs  = distM / (dtMs / 1000);
+        dr.speedKmh    = speedMs * 3.6;
 
-    // Update route name from savedRouteInfo (always available) or cachedRouteJSON
+        if (dr.speedKmh <= 60 && distM >= 5) {
+          // Valid truck movement — compute degree/ms velocity components
+          dr.vLat = (newLat - dr.curLat) / dtMs;
+          dr.vLng = (newLng - dr.curLng) / dtMs;
+          console.log('[DR] New fix: speed', dr.speedKmh.toFixed(1),
+            'km/h, moved', distM.toFixed(0), 'm in', (dtMs/1000).toFixed(0), 's',
+            '| vLat/s:', (dr.vLat*1000).toFixed(8), 'vLng/s:', (dr.vLng*1000).toFixed(8));
+        } else if (distM < 5) {
+          // Truck is stationary (collecting garbage) — keep previous velocity = 0
+          dr.vLat = 0; dr.vLng = 0;
+          console.log('[DR] Truck stationary (moved', distM.toFixed(1), 'm)');
+        } else {
+          // Speed > 60 km/h = GPS outlier, discard
+          dr.vLat = 0; dr.vLng = 0;
+          console.warn('[DR] Outlier: speed', dr.speedKmh.toFixed(1), 'km/h, ignoring');
+        }
+      } else {
+        // Gap too large or negative — cannot compute meaningful velocity
+        dr.vLat = 0; dr.vLng = 0;
+        console.warn('[DR] Gap too large:', (dtMs/1000).toFixed(0), 's, velocity reset');
+      }
+    }
+
+    // ── Store this fix as the new reference ─────────────────────────────
+    dr.curLat     = newLat;
+    dr.curLng     = newLng;
+    dr.curTs      = nowMs;
+    dr.isEstimate = false;
+
+    // Update green dot = real fix received
+    document.getElementById('heroUpdDot').style.background = '#7ef0a8';
+
+    // Update route name
     const row = (State.savedRouteInfo || []).find(r => r.lineid === lineid)
              || (State.cachedRouteJSON || []).find(r => r.lineid === lineid);
-    const el = document.getElementById('heroRouteName');
-    if (el) el.textContent = row ? (row.linename || lineid) : lineid;
+    const nameEl = document.getElementById('heroRouteName');
+    if (nameEl) nameEl.textContent = row ? (row.linename || lineid) : lineid;
+  },
 
-    // Status bar + voice
+  /* ── Dead-Reckoning timer: runs every 5 seconds ── */
+  _startDRTimer() {
+    if (State.dr.timer) return; // already running
+    State.dr.timer = setInterval(() => {
+      if (!State.tracking) { this._stopDRTimer(); return; }
+      this._drTick();
+    }, 5000);
+    // Run one tick immediately so the screen updates right away
+    this._drTick();
+  },
+
+  _stopDRTimer() {
+    if (State.dr.timer) { clearInterval(State.dr.timer); State.dr.timer = null; }
+  },
+
+  /* ── DR tick: compute estimated position and update all UI ── */
+  _drTick() {
+    if (!State.userLat) return;
+    const dr    = State.dr;
+    const nowMs = Date.now();
+
+    // ── Determine truck position for this tick ───────────────────────────
+    let estLat, estLng, isEstimate, ageSec;
+
+    if (dr.curLat === null) {
+      // No GPS fix at all yet — nothing to show
+      return;
+    }
+
+    ageSec = (nowMs - dr.curTs) / 1000;
+    const MAX_EXTRAP_SEC = 5 * 60;  // stop extrapolating after 5 min without update
+
+    if (ageSec <= MAX_EXTRAP_SEC && (dr.vLat !== 0 || dr.vLng !== 0)) {
+      // Extrapolate: estimated_pos = last_real_pos + velocity × elapsed_time
+      const elapsedMs = nowMs - dr.curTs;
+      estLat      = dr.curLat + dr.vLat * elapsedMs;
+      estLng      = dr.curLng + dr.vLng * elapsedMs;
+      isEstimate  = true;
+    } else {
+      // No valid velocity (stationary, first fix, or stale) — use last known real fix
+      estLat     = dr.curLat;
+      estLng     = dr.curLng;
+      isEstimate = (ageSec > 30); // consider stale if >30s old with no extrapolation
+    }
+
+    dr.isEstimate = isEstimate;
+
+    // ── Distance from user to estimated truck position ───────────────────
+    const dist = Math.round(haversine(State.userLat, State.userLng, estLat, estLng));
+
+    // ── UI: distance hero card ───────────────────────────────────────────
+    if (dist >= 1000) {
+      document.getElementById('heroDistNum').textContent  = (dist / 1000).toFixed(1);
+      document.getElementById('heroDistUnit').textContent = '公里';
+    } else {
+      document.getElementById('heroDistNum').textContent  = dist;
+      document.getElementById('heroDistUnit').textContent = '公尺';
+    }
+    document.getElementById('heroEtaVal').textContent = etaText(dist);
+
+    // ── Update timestamp label ───────────────────────────────────────────
+    const now     = new Date();
+    const hh      = String(now.getHours()).padStart(2,'0');
+    const mm      = String(now.getMinutes()).padStart(2,'0');
+    const ss      = String(now.getSeconds()).padStart(2,'0');
+    const timeStr = hh + ':' + mm + ':' + ss;
+
+    if (isEstimate) {
+      document.getElementById('heroUpdTime').textContent =
+        timeStr + ' 推算（' + Math.round(ageSec) + '秒前定位）';
+      document.getElementById('heroUpdDot').style.background = '#f0c040'; // yellow = estimated
+    } else if (ageSec <= 10) {
+      document.getElementById('heroUpdTime').textContent = timeStr + ' ✅ 實際位置';
+      document.getElementById('heroUpdDot').style.background = '#7ef0a8'; // green = fresh real fix
+    } else {
+      document.getElementById('heroUpdTime').textContent = timeStr + ' 靜止中';
+      document.getElementById('heroUpdDot').style.background = '#aaa';
+    }
+
+    // ── Map: update truck marker ─────────────────────────────────────────
+    const lineid   = State.activeLineid || State.sel[State.activeTab];
+    const truckRow = (State.savedRouteInfo || []).find(r => r.lineid === lineid)
+                  || (State.cachedRouteJSON || []).find(r => r.lineid === lineid);
+    const name     = truckRow ? (truckRow.linename || lineid) : lineid;
+    this._updateTruckMarker(estLat, estLng, name, isEstimate);
+
+    // ── Status bar colour ────────────────────────────────────────────────
     const bar = document.getElementById('statusBar');
     if (dist <= 200) {
       bar.className = 'status-bar danger';
-      this._playAudio('垃圾車即將到達請準備');
-      if (dist <= 80) this._showArrived();
     } else if (dist <= State.distAlert) {
       bar.className = 'status-bar warning';
-      this._playAudio(this._distanceAudioKey(dist));
     } else {
-      bar.className = 'status-bar';
+      bar.className = 'status-bar';  // green (default)
     }
+
+    // ── Voice: throttled so we do not shout every 5 seconds ─────────────
+    // Only announce when:
+    //   (a) distance changed by ≥ 100 m since last announcement, AND
+    //   (b) at least 25 seconds have passed since the last announcement.
+    const VOICE_INTERVAL_MS  = 25 * 1000;
+    const VOICE_DIST_CHANGE  = 100; // metres
+    const lastDist = dr.lastVoiceDist;
+    const lastTs   = dr.lastVoiceTs || 0;
+    const distChanged = lastDist === null || Math.abs(dist - lastDist) >= VOICE_DIST_CHANGE;
+    const timeOk      = (nowMs - lastTs) >= VOICE_INTERVAL_MS;
+
+    if (distChanged && timeOk) {
+      dr.lastVoiceDist = dist;
+      dr.lastVoiceTs   = nowMs;
+
+      if (dist <= 80) {
+        this._showArrived();
+      } else if (dist <= 200) {
+        this._playAudio('垃圾車即將到達請準備');
+      } else if (dist <= State.distAlert) {
+        this._playAudio(this._distanceAudioKey(dist));
+      }
+      // Beyond distAlert: no voice (just watching)
+    }
+
+    console.log('[DR]', timeStr, isEstimate ? '估算' : '實際',
+      dist + 'm', 'age=' + Math.round(ageSec) + 's',
+      'v=' + (dr.speedKmh || 0).toFixed(1) + 'km/h');
   },
 
   _setHeroNoTruck() {
-    document.getElementById('heroDistNum').textContent = '—';
+    document.getElementById('heroDistNum').textContent  = '—';
     document.getElementById('heroDistUnit').textContent = '公尺';
-    document.getElementById('heroEtaVal').textContent = '車輛尚未出勤';
-    this._setAlert('info', '🕐', '車輛尚未出勤',
-      '目前此路線車輛尚未出勤，系統將繼續每 2 分鐘自動確認。');
+    document.getElementById('heroEtaVal').textContent   = '車輛尚未出勤';
+    document.getElementById('heroUpdDot').style.background = '#aaa';
+    document.getElementById('heroUpdTime').textContent  = '等待車輛出勤…';
   },
 
   _setAlert(cls, icon, title, sub) {
