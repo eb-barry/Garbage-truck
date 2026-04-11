@@ -1,0 +1,50 @@
+name: 每日更新垃圾車路線資料
+
+on:
+  schedule:
+    - cron: '0 22 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-routes-csv:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v5
+
+      - name: Download routes.csv from NTPC Open Data
+        run: |
+          echo "下載新北市垃圾車路線資料..."
+          curl -L \
+            --retry 3 \
+            --retry-delay 5 \
+            --max-time 60 \
+            -o routes.csv \
+            "https://data.ntpc.gov.tw/api/datasets/edc3ad26-8ae7-4916-a00b-bc6048d19bf8/csv/file"
+
+          LINE_COUNT=$(wc -l < routes.csv)
+          echo "下載完成，共 ${LINE_COUNT} 行"
+
+          if [ "$LINE_COUNT" -lt 100 ]; then
+            echo "錯誤：資料筆數過少（${LINE_COUNT} 行）"
+            exit 1
+          fi
+
+      - name: Commit and push (keep only latest version)
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add routes.csv
+
+          if git diff --staged --quiet; then
+            echo "routes.csv 沒有變更"
+          else
+            TODAY=$(date -u '+%Y-%m-%d')
+            git commit --amend -m "自動更新路線資料 ${TODAY}"
+            git push --force
+          fi
