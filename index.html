@@ -728,7 +728,7 @@
     <!-- ══ STEP 5: 語音設定 ══ -->
     <div class="step-card" id="step5Card">
       <div class="step-row">
-        <div class="step-num active" id="snum5">5</div>
+        <div class="step-num" id="snum5">5</div>
         <div class="step-body">
           <div class="step-title">語音播報設定</div>
           <div class="step-desc">選擇語音播報的聲音類型</div>
@@ -1047,14 +1047,11 @@ const App = {
       el.classList.add('active');
 
       if (name === 'settings') {
-        try { this.populateSettingsFromState(); } catch(e) { console.warn(e); }
-        if (State.currentDistrict) {
-          try { this._showLocationCard(State.currentDistrict, '已儲存的位置'); } catch(e) {}
-          try { this._activateStep(State.currentVillage ? 3 : 2); } catch(e) {}
-        }
         if (State.tracking) {
           try { this._stopTracking(); } catch(e) {}
         }
+        // populateSettingsFromState handles ALL UI restoration internally
+        try { this.populateSettingsFromState(); } catch(e) { console.warn('settings restore:', e); }
       }
 
       if (name === 'tracking') {
@@ -1067,20 +1064,123 @@ const App = {
 
   /* ── SETTINGS SCREEN ── */
 
-  // Repopulate settings UI if returning from tracking screen
+  // Repopulate settings UI from State (which was loaded from localStorage)
+  // Called every time the settings screen is shown.
   populateSettingsFromState() {
-    document.getElementById('distSlider').value = State.distAlert;
-    this.updateDist(State.distAlert);
-    // Restore voice type radio
+    // ── Step 4: Distance slider ──────────────────────────────────────────
+    document.getElementById('distSlider').value = State.distAlert || 500;
+    this.updateDist(State.distAlert || 500);
+
+    // ── Step 5: Voice type ───────────────────────────────────────────────
     const radios = document.querySelectorAll('input[name="voiceType"]');
-    radios.forEach(r => { r.checked = (r.value === State.voiceType); });
+    radios.forEach(r => { r.checked = (r.value === (State.voiceType || 'female')); });
     if (State.voiceType === 'custom') {
       document.getElementById('customVoiceRow').classList.add('visible');
       if (State.customVoiceEnabled) {
         document.getElementById('customVoiceCode').value = '1212';
         document.getElementById('customVoiceStatus').classList.remove('hidden');
       }
+    } else {
+      document.getElementById('customVoiceRow').classList.remove('visible');
     }
+
+    // ── Steps 1-3: Location + village + routes ───────────────────────────
+    if (!State.currentDistrict) return; // no saved setup, leave form blank
+
+    // Step 1: Show location card
+    this._showLocationCard(State.currentDistrict, '已儲存的位置');
+
+    // Step 2: Populate and select village dropdown
+    // We need the full CSV to build the village list.
+    // If cachedRouteJSON is available, use it immediately.
+    // Otherwise, populate the dropdown with just the saved village so the
+    // field is not blank, and reload CSV in background to fill options.
+    this._restoreVillageSelect();
+
+    // Step 3: Show saved route summaries (checkboxes may not be re-rendered
+    // without the full CSV, so show a text summary of saved routes)
+    this._restoreRoutesSummary();
+
+    // Activate all steps that are already configured
+    const completedStep = State.allCheckedRoutes && State.allCheckedRoutes.length > 0 ? 5 : 2;
+    this._activateStep(completedStep);
+  },
+
+  // Restore village dropdown with saved value
+  _restoreVillageSelect() {
+    if (!State.currentVillage) return;
+    const sel = document.getElementById('villageSelect');
+    if (!sel) return;
+
+    // Show the section
+    document.getElementById('villageSection').classList.add('visible');
+
+    // If CSV is loaded, build the full dropdown
+    if (State.cachedRouteJSON && State.cachedRouteJSON.length) {
+      this._populateVillageSelect(State.cachedRouteJSON, State.currentDistrict);
+    } else {
+      // CSV not in memory — just add the saved village as the only option
+      sel.innerHTML =
+        `<option value="${State.currentVillage}" selected>${State.currentVillage}</option>`;
+    }
+
+    // Select the saved village
+    sel.value = State.currentVillage;
+
+    // Update step 2 description
+    const desc = document.getElementById('step2desc');
+    if (desc) desc.textContent = `目前選擇：${State.currentVillage}`;
+  },
+
+  // Restore route selection summary without re-rendering full checkbox list
+  _restoreRoutesSummary() {
+    if (!State.savedRouteInfo || !State.savedRouteInfo.length) return;
+
+    const routeArea = document.getElementById('routeArea');
+    const selSummary = document.getElementById('selSummary');
+    if (!routeArea) return;
+
+    // If we have the full CSV, render interactive checkboxes
+    if (State.cachedRouteJSON && State.cachedRouteJSON.length && State.currentVillage) {
+      this._renderRouteList(State.cachedRouteJSON, State.currentDistrict, State.currentVillage);
+      // Re-check the previously selected routes
+      State.allCheckedRoutes.forEach(lineid => {
+        const idx = State.savedRouteInfo.findIndex(r => r.lineid === lineid);
+        if (idx >= 0) {
+          const item  = document.getElementById(`ri_${idx}`);
+          if (item) {
+            item.classList.add('checked');
+            State.checkedRoutes.add(lineid);
+          }
+        }
+      });
+    } else {
+      // CSV not loaded — show read-only text summary
+      const lines = State.savedRouteInfo
+        .filter(r => State.allCheckedRoutes.includes(r.lineid))
+        .map(r => `✅ <strong>${r.linename || r.lineid}</strong>（${r.time}）`);
+
+      const summary = `<div style="padding:12px 0; font-size:16px; line-height:2.0; color:var(--text-primary);">
+        <div style="font-size:14px;color:var(--text-secondary);margin-bottom:6px;">已儲存的路線（點「儲存設定」繼續，或重新選擇）</div>
+        ${lines.join('<br>')}
+      </div>`;
+      routeArea.innerHTML = summary;
+      routeArea.classList.add('visible');
+    }
+
+    // Show selection summary
+    if (selSummary) {
+      const summaryLines = State.savedRouteInfo
+        .filter(r => State.allCheckedRoutes.includes(r.lineid))
+        .map(r => `✅ <strong>${r.linename || r.lineid}</strong>（${r.time}）`);
+      selSummary.innerHTML = '已選擇：<br>' + summaryLines.join('<br>');
+      selSummary.classList.remove('hidden');
+    }
+
+    // Update step 3 description
+    const desc = document.getElementById('step3desc');
+    if (desc) desc.textContent =
+      `已選擇 ${State.allCheckedRoutes.length} 條路線（可重新勾選）`;
   },
 
   showNotice(msg, type = 'error') {
@@ -1312,6 +1412,8 @@ const App = {
   onVillageChange(village) {
     if (!village) return;
     State.currentVillage = village;
+    // Clear previously checked routes when user picks a new village
+    State.checkedRoutes = new Set();
     this._renderRouteList(State.cachedRouteJSON, State.currentDistrict, village);
     this._activateStep(3);
   },
@@ -1631,7 +1733,7 @@ const App = {
   },
 
   _activateStep(n) {
-    for (let i = 1; i <= 4; i++) {
+    for (let i = 1; i <= 5; i++) {
       const el = document.getElementById('snum' + i);
       if (el) el.classList.toggle('active', i <= n);
     }
@@ -1797,6 +1899,7 @@ const App = {
 
     saveToStorage();
     State.arrivedShown = false;
+    this._activateStep(5); // all steps complete — all circles green before switching
     this.showScreen('tracking');
   },
 
